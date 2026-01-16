@@ -7,7 +7,18 @@
       "Bash(echo:*)",
       "Bash(netstat:*)",
       "Bash(findstr:*)",
-      "Bash(tasklist:*)"
+      "Bash(tasklist:*)",
+      "Bash(taskkill:*)",
+      "Bash(timeout /t 2 /nobreak)",
+      "Bash(ping:*)",
+      "Bash(git checkout:*)",
+      "Bash(cmd /c \"taskkill /PID 28268 /F\")",
+      "Bash(cmd /c \"ping -n 2 127.0.0.1 > nul && netstat -ano | findstr :8084\")",
+      "Bash(dir:*)",
+      "Bash(powershell -Command \"\\(Get-Content ''c:\\\\Users\\\\welch\\\\Desktop\\\\VF\\\\node_modules\\\\molstar\\\\build\\\\viewer\\\\molstar.js'' -Raw\\).Length\")",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run dev:*)"
     ]
   }
 }
