@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PV Molecular Viewer</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- PV Viewer for molecular visualization -->
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/bio-pv@1.8.1/bio-pv.min.js"></script>
+</head>
+<body>
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Left Panel: RCSB Input -->
+        <div class="left-panel">
+            <div class="input-section">
+                <h3><i class="fas fa-database"></i> 구조 로드</h3>
+                <div class="input-group">
+                    <label for="pdbId">PDB ID</label>
+                    <input type="text" id="pdbId" placeholder="예: 1CRN" maxlength="4">
+                </div>
+                <button class="load-btn" onclick="loadFromRCSB()">
+                    <i class="fas fa-download"></i> RCSB에서 불러오기
+                </button>
+
+                <div class="divider">또는</div>
+
+                <div class="input-group">
+                    <label for="fileInput">로컬 파일</label>
+                    <input type="file" id="fileInput" accept=".pdb,.cif,.mol2" style="display: none;" onchange="loadFromFile(event)">
+                    <button class="load-btn" onclick="document.getElementById('fileInput').click()">
+                        <i class="fas fa-upload"></i> 파일 업로드
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel: NGL Viewer -->
+        <div class="review-right-panel">
+            <div class="viewer-container">
+                <!-- 3D Viewer Area -->
+                <div class="viewer-3d-wrapper">
+                    <div id="viewer3d" class="viewer-3d"></div>
+
+                    <!-- Right Controls -->
+                    <div class="right-controls">
+                        <div class="style-buttons">
+                            <button class="style-btn active" onclick="setStyle('cartoon')" data-style="cartoon" title="Cartoon">
+                                <span class="style-label">C</span>
+                            </button>
+                            <button class="style-btn" onclick="setStyle('ribbon')" data-style="ribbon" title="Ribbon">
+                                <span class="style-label">R</span>
+                            </button>
+                            <button class="style-btn" onclick="setStyle('stick')" data-style="stick" title="Stick">
+                                <span class="style-label">S</span>
+                            </button>
+                            <button class="style-btn" onclick="setStyle('sphere')" data-style="sphere" title="Sphere">
+                                <span class="style-label">B</span>
+                            </button>
+                            <button class="style-btn" onclick="setStyle('line')" data-style="line" title="Line">
+                                <span class="style-label">L</span>
+                            </button>
+                            <button class="style-btn" onclick="setStyle('mesh')" data-style="mesh" title="Mesh">
+                                <span class="style-label">M</span>
+                            </button>
+                        </div>
+
+                        <div class="color-silhouette-group">
+                            <div class="color-buttons">
+                                <button class="color-btn active" onclick="setColor('chainid')" data-color="chainid" title="체인별">
+                                    <i class="fas fa-link"></i>
+                                </button>
+                                <button class="color-btn" onclick="setColor('ss')" data-color="ss" title="이차구조">
+                                    <i class="fas fa-dna"></i>
+                                </button>
+                                <button class="color-btn" onclick="setColor('residueindex')" data-color="residueindex" title="레인보우">
+                                    <i class="fas fa-rainbow"></i>
+                                </button>
+                            </div>
+
+                            <button class="silhouette-btn active" onclick="toggleSilhouette()" title="실루엣">
+                                <i class="fas fa-adjust"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Bottom Left Controls -->
+                    <div class="viewer-zoom-controls">
+                        <div style="display: flex; gap: 4px;">
+                            <button class="zoom-btn" onclick="resetViewerView()" title="뷰 리셋">
+                                <i class="fas fa-home"></i>
+                            </button>
+                            <button class="zoom-btn" onclick="toggleViewerSpin()" title="자동 회전">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                            <button class="zoom-btn" onclick="viewerZoomIn()" title="확대">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                            <button class="zoom-btn" onclick="viewerZoomOut()" title="축소">
+                                <i class="fas fa-minus"></i>
+                            </button>
+                        </div>
+
+                        <!-- Outline Settings -->
+                        <div class="outline-settings">
+                            <div class="setting-group">
+                                <label>실루엣 색상</label>
+                                <input type="color" id="outlineColorPicker" value="#1a1a1a" onchange="setOutlineColor(this.value)" title="실루엣 색상">
+                            </div>
+                            <div class="setting-group">
+                                <label>두께</label>
+                                <input type="range" id="outlineWidthSlider" min="0.5" max="5" step="0.5" value="1.5" onchange="setOutlineWidth(this.value)" title="실루엣 두께">
+                                <span id="outlineWidthValue">1.5</span>
+                            </div>
+                        </div>
+
+                        <!-- Color Palette -->
+                        <div class="color-palette">
+                            <div class="palette-color" style="background: #FFB3BA;" onclick="setCustomColor('#FFB3BA')" title="Pastel Pink"></div>
+                            <div class="palette-color" style="background: #FFDFBA;" onclick="setCustomColor('#FFDFBA')" title="Pastel Peach"></div>
+                            <div class="palette-color" style="background: #FFFFBA;" onclick="setCustomColor('#FFFFBA')" title="Pastel Yellow"></div>
+                            <div class="palette-color" style="background: #BAFFC9;" onclick="setCustomColor('#BAFFC9')" title="Pastel Mint"></div>
+                            <div class="palette-color" style="background: #BAE1FF;" onclick="setCustomColor('#BAE1FF')" title="Pastel Blue"></div>
+                            <div class="palette-color" style="background: #E0BBE4;" onclick="setCustomColor('#E0BBE4')" title="Pastel Lavender"></div>
+                            <div class="palette-color" style="background: #FFDFD3;" onclick="setCustomColor('#FFDFD3')" title="Pastel Coral"></div>
+                            <div class="palette-color" style="background: #C7CEEA;" onclick="setCustomColor('#C7CEEA')" title="Pastel Periwinkle"></div>
+                            <div class="palette-color palette-custom" onclick="openCustomColorPicker()" title="사용자 정의 색상">
+                                <i class="fas fa-palette"></i>
+                            </div>
+                        </div>
+                        <input type="color" id="customColorPicker" style="display: none;" onchange="addCustomPaletteColor(this.value)">
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    <script src="viewer.js"></script>
+</body>
+</html>

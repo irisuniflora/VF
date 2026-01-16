@@ -1,0 +1,103 @@
+.mainContent {
+    min-height: 100vh;
+    padding: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+}
+
+.reviewRightPanel {
+    width: 960px;
+    max-width: 90vw;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+.viewerContainer {
+    height: 600px;
+    position: relative;
+    background: #ffffff;
+    border-radius: 16px;
+    border: 1px solid #c8d8d8;
+    overflow: hidden;
+}
+
+.viewer3dWrapper {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    background: transparent;
+}
+
+.viewer3d {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+.leftControls {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    z-index: 10;
+}
+
+.viewerSelectionInfo {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    display: flex;
+    gap: 16px;
+    background: transparent;
+    padding: 8px 16px;
+    color: #1a2a2a;
+    font-size: 0.85rem;
+    z-index: 10;
+}
+
+.selectedCount,
+.nearbyCount {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.selectedCount b,
+.nearbyCount b {
+    font-weight: 600;
+}
+
+.emptyState {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    z-index: 5;
+    pointer-events: none;
+}
+
+.emptyState i {
+    font-size: 4rem;
+    color: #c8d8d8;
+}
+
+.emptyState p {
+    margin: 0;
+    font-size: 1.1rem;
+    color: #9ca3af;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+}
