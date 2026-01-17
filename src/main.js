@@ -303,12 +303,19 @@ function updateChainSelector(chains) {
     const select = document.getElementById('chainSelect');
     select.innerHTML = '<option value="">All Chains</option>';
 
-    chains.sort().forEach(chain => {
+    const sortedChains = chains.sort();
+    sortedChains.forEach(chain => {
         const option = document.createElement('option');
         option.value = chain;
         option.textContent = `Chain ${chain}`;
         select.appendChild(option);
     });
+
+    // Set first chain as default selection
+    if (sortedChains.length > 0) {
+        select.value = sortedChains[0];
+        currentChainFilter = sortedChains[0];
+    }
 }
 
 function displaySequence() {
@@ -757,17 +764,23 @@ async function rebuildAllRepresentations(structureRef) {
         const colorValue = parseInt(color.replace('#', ''), 16);
         const query = buildSelectionQuery(residueSet);
 
-        const comp = await plugin.builders.structure.tryCreateComponentFromExpression(
-            structureRef.cell,
-            query,
-            `color-${color.replace('#', '')}-${Date.now()}`,
-            { label: `Color ${color}` }
-        );
+        try {
+            const comp = await plugin.builders.structure.tryCreateComponentFromExpression(
+                structureRef.cell,
+                query,
+                `color-${color.replace('#', '')}-${Date.now()}`,
+                { label: `Color ${color}` }
+            );
 
-        if (comp) {
-            for (const reprType of activeTypes) {
-                await addRepresentationWithColor(reprBuilder, comp, reprType, colorValue);
+            console.log(`Component for ${color}: ${comp ? 'created' : 'failed'}`);
+
+            if (comp) {
+                for (const reprType of activeTypes) {
+                    await addRepresentationWithColor(reprBuilder, comp, reprType, colorValue);
+                }
             }
+        } catch (e) {
+            console.error(`Failed to create component for ${color}:`, e);
         }
     }
 
@@ -796,6 +809,7 @@ async function rebuildAllRepresentations(structureRef) {
 
 // Helper: Add representation with uniform color
 async function addRepresentationWithColor(reprBuilder, component, reprType, colorValue) {
+    console.log(`addRepresentationWithColor: ${reprType}, color: 0x${colorValue.toString(16)}`);
     try {
         if (reprType === 'molecular-surface') {
             try {
@@ -804,7 +818,9 @@ async function addRepresentationWithColor(reprBuilder, component, reprType, colo
                     color: 'uniform',
                     colorParams: { value: colorValue }
                 });
+                console.log('  -> molecular-surface added');
             } catch (e) {
+                console.log('  -> molecular-surface failed, trying gaussian');
                 await reprBuilder.addRepresentation(component, {
                     type: 'gaussian-surface',
                     color: 'uniform',
@@ -812,11 +828,12 @@ async function addRepresentationWithColor(reprBuilder, component, reprType, colo
                 });
             }
         } else {
-            await reprBuilder.addRepresentation(component, {
+            const result = await reprBuilder.addRepresentation(component, {
                 type: reprType,
                 color: 'uniform',
                 colorParams: { value: colorValue }
             });
+            console.log(`  -> ${reprType} added:`, result ? 'success' : 'null result');
         }
     } catch (e) {
         console.error(`Failed to add ${reprType}:`, e);
@@ -851,50 +868,62 @@ async function addRepresentationWithScheme(reprBuilder, component, reprType, col
 
 // Delete all polymer representations
 async function deleteAllPolymerRepresentations(structureRef) {
-    const components = structureRef.components || [];
+    console.log('deleteAllPolymerRepresentations: starting');
 
-    for (const comp of components) {
-        // Skip non-polymer components (ligand, ion, water, etc.)
-        const compKey = comp.key?.toLowerCase() || '';
-        if (compKey.includes('ligand') || compKey.includes('ion') ||
-            compKey.includes('water') || compKey.includes('branched')) {
-            continue;
-        }
+    // Use state tree to find and delete all representations
+    const state = plugin.state.data;
+    const cells = state.cells;
+    const toDelete = [];
 
-        if (!comp.representations) continue;
+    cells.forEach((cell, ref) => {
+        if (!cell.obj) return;
 
-        for (const repr of comp.representations) {
-            if (!repr.cell) continue;
+        const obj = cell.obj;
+        const label = obj.label?.toLowerCase() || '';
+        const tags = cell.transform?.tags || [];
 
-            const reprLabel = repr.cell.obj?.repr?.label?.toLowerCase() || '';
+        // Check if it's a representation we want to delete
+        const isRepr = obj.type?.name === 'representation-3d' ||
+                       label.includes('cartoon') ||
+                       label.includes('ball') ||
+                       label.includes('stick') ||
+                       label.includes('surface') ||
+                       label.includes('gaussian');
 
-            // Delete polymer representations
-            if (reprLabel.includes('cartoon') || reprLabel.includes('ball') ||
-                reprLabel.includes('stick') || reprLabel.includes('surface')) {
-                try {
-                    const update = plugin.build();
-                    update.delete(repr.cell);
-                    await update.commit();
-                } catch (e) {
-                    // Ignore
-                }
+        // Check if it's a custom color component
+        const isColorComp = label.includes('color #') ||
+                           label.includes('uncolored') ||
+                           tags.some(t => t.includes('color-') || t.includes('uncolored'));
+
+        if (isRepr || isColorComp) {
+            // Make sure it's related to polymer (not ligand/water/ion)
+            const parentLabel = cell.sourceRef ?
+                (state.cells.get(cell.sourceRef)?.obj?.label?.toLowerCase() || '') : '';
+
+            if (!parentLabel.includes('ligand') &&
+                !parentLabel.includes('ion') &&
+                !parentLabel.includes('water')) {
+                toDelete.push(ref);
             }
         }
-    }
+    });
 
-    // Also delete custom color components
-    for (const comp of components) {
-        const compKey = comp.key?.toLowerCase() || '';
-        if (compKey.includes('color-') || compKey.includes('uncolored')) {
+    console.log(`deleteAllPolymerRepresentations: found ${toDelete.length} items to delete`);
+
+    // Delete all found items
+    if (toDelete.length > 0) {
+        const update = plugin.build();
+        for (const ref of toDelete) {
             try {
-                const update = plugin.build();
-                update.delete(comp.cell);
-                await update.commit();
+                update.delete(ref);
             } catch (e) {
                 // Ignore
             }
         }
+        await update.commit();
     }
+
+    console.log('deleteAllPolymerRepresentations: done');
 }
 
 // Apply color to current selection
@@ -1052,6 +1081,78 @@ function openColorPicker() {
 
 function applyCustomColor(hexColor) {
     applyPaletteColor(hexColor);
+}
+
+// Custom chain color palette - 10 visually distinct, beautiful colors
+const CHAIN_COLOR_PALETTE = [
+    '#5C8EBF',  // Blue
+    '#6AAF6A',  // Green
+    '#E8A838',  // Orange/Gold
+    '#D46A6A',  // Red/Coral
+    '#9B7BB8',  // Purple
+    '#6AB8B8',  // Teal/Cyan
+    '#D4A76A',  // Tan/Brown
+    '#E57DAD',  // Pink
+    '#7B9E5A',  // Olive Green
+    '#8B7355',  // Brown
+];
+
+// Apply chain-based coloring with custom palette
+async function applyChainColor() {
+    if (!plugin || !currentStructure) return;
+
+    // Clear previous states
+    residueColorMap.clear();
+    currentUniformColor = null;
+    currentColorScheme = 'custom-chain';
+
+    // Clear palette active states
+    document.querySelectorAll('.palette-color').forEach(el => el.classList.remove('active'));
+
+    showLoading(true);
+    const cameraSnapshot = plugin.canvas3d?.camera.getSnapshot();
+
+    try {
+        const structures = plugin.managers.structure.hierarchy.current.structures;
+        if (structures.length === 0) return;
+
+        const structIndex = (currentStructureIndex >= 0 && currentStructureIndex < structures.length)
+            ? currentStructureIndex : 0;
+        const structureRef = structures[structIndex];
+
+        // Get unique chains from sequence data
+        const chains = [...new Set(sequenceData.map(r => r.chain))];
+        console.log(`applyChainColor: Found ${chains.length} chains:`, chains);
+
+        // Assign colors to each chain's residues
+        chains.forEach((chain, index) => {
+            const color = CHAIN_COLOR_PALETTE[index % CHAIN_COLOR_PALETTE.length];
+            sequenceData.forEach(res => {
+                if (res.chain === chain) {
+                    residueColorMap.set(`${res.chain}:${res.resno}`, color);
+                }
+            });
+        });
+
+        console.log(`residueColorMap: ${residueColorMap.size} entries with ${chains.length} chain colors`);
+
+        // Delete existing and rebuild with new colors
+        await deleteAllPolymerRepresentations(structureRef);
+        await rebuildAllRepresentations(structureRef);
+
+        if (cameraSnapshot && plugin.canvas3d) {
+            setTimeout(() => {
+                plugin.canvas3d.camera.setState(cameraSnapshot, 0);
+            }, 50);
+        }
+
+        console.log('Custom chain colors applied');
+
+    } catch (error) {
+        console.error('Chain color error:', error);
+    } finally {
+        showLoading(false);
+    }
 }
 
 // =====================================================
@@ -1548,22 +1649,25 @@ function addToStructuresList(id, name, structIndex) {
 }
 
 function updateStructuresListUI() {
-    const container = document.getElementById('structuresList');
-    if (!container) return;
-
-    if (loadedStructures.length === 0) {
-        container.innerHTML = '<div class="no-structures">No structures loaded</div>';
-        return;
+    // Update floating structure tags in viewer
+    const floatingContainer = document.getElementById('floatingStructures');
+    if (floatingContainer) {
+        if (loadedStructures.length === 0) {
+            floatingContainer.innerHTML = '';
+        } else {
+            floatingContainer.innerHTML = loadedStructures.map(struct => `
+                <div class="structure-tag ${struct.id === currentStructure ? 'active' : ''}" onclick="focusOnStructure('${struct.id}')">
+                    <span>${struct.name}</span>
+                    <button class="tag-download" onclick="event.stopPropagation(); downloadStructure('${struct.id}')" title="Download">
+                        <i class="fas fa-download"></i>
+                    </button>
+                    <button class="tag-delete" onclick="event.stopPropagation(); removeStructure('${struct.id}')" title="Remove">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            `).join('');
+        }
     }
-
-    container.innerHTML = loadedStructures.map(struct => `
-        <div class="structure-item ${struct.id === currentStructure ? 'active' : ''}" onclick="focusOnStructure('${struct.id}')">
-            <span class="structure-name">${struct.name}</span>
-            <button class="structure-delete" onclick="event.stopPropagation(); removeStructure('${struct.id}')" title="Remove">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-    `).join('');
 }
 
 function focusOnStructure(structureId) {
@@ -1791,6 +1895,70 @@ window.clearAllStructures = clearAllStructures;
 window.applySecondaryStructureColoring = applySecondaryStructureColoring;
 window.showRepresentation = showRepresentation;
 window.hideRepresentation = hideRepresentation;
+window.applyChainColor = applyChainColor;
+window.downloadStructure = downloadStructure;
+
+// Download structure as PDB file
+async function downloadStructure(structureId) {
+    if (!plugin) return;
+
+    const structInfo = loadedStructures.find(s => s.id === structureId);
+    if (!structInfo) {
+        console.error('Structure not found:', structureId);
+        return;
+    }
+
+    showLoading(true);
+
+    try {
+        const structures = plugin.managers.structure.hierarchy.current.structures;
+
+        // Find the structure
+        let structIndex = -1;
+        for (let i = 0; i < structures.length; i++) {
+            const s = structures[i];
+            const label = s.cell.obj?.label || '';
+            if (label.includes(structureId) || structureId.includes(label) ||
+                label.toLowerCase().includes(structureId.toLowerCase())) {
+                structIndex = i;
+                break;
+            }
+        }
+
+        if (structIndex === -1) {
+            structIndex = Math.min(structInfo.structIndex, structures.length - 1);
+        }
+
+        if (structIndex >= 0 && structIndex < structures.length) {
+            const struct = structures[structIndex];
+            const data = struct.cell.obj?.data;
+
+            if (data) {
+                // Use Mol* built-in export to get PDB string
+                const { to_mmCIF } = await import('molstar/lib/mol-model/structure/export/mmcif');
+                const cifString = to_mmCIF(structInfo.name || structureId, data, false);
+
+                // Create and download file
+                const blob = new Blob([cifString], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${structInfo.name || structureId}.cif`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                console.log(`Downloaded: ${structInfo.name}.cif`);
+            }
+        }
+    } catch (error) {
+        console.error('Download error:', error);
+        alert('Failed to download structure. See console for details.');
+    } finally {
+        showLoading(false);
+    }
+}
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {

@@ -116,116 +116,6 @@
         .divider::before { left: 0; }
         .divider::after { right: 0; }
 
-        /* Structures Section */
-        .structures-section {
-            margin-top: 20px;
-            padding-top: 16px;
-            border-top: 1px solid #e5e7eb;
-        }
-
-        .structures-section h3 {
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .structures-list {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            max-height: 200px;
-            overflow-y: auto;
-            margin-bottom: 12px;
-        }
-
-        .no-structures {
-            color: #9ca3af;
-            font-size: 12px;
-            font-style: italic;
-            text-align: center;
-            padding: 12px;
-        }
-
-        .structure-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 8px 10px;
-            background: #f8fafc;
-            border: 1px solid #e5e7eb;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: all 0.15s ease;
-        }
-
-        .structure-item:hover {
-            background: #f0f9ff;
-            border-color: var(--accent-primary);
-        }
-
-        .structure-item.active {
-            background: var(--accent-primary);
-            border-color: var(--accent-primary);
-            color: white;
-        }
-
-        .structure-item .structure-name {
-            font-size: 13px;
-            font-weight: 500;
-            flex: 1;
-        }
-
-        .structure-item .structure-delete {
-            width: 20px;
-            height: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border: none;
-            background: transparent;
-            color: #9ca3af;
-            cursor: pointer;
-            border-radius: 4px;
-            font-size: 11px;
-            transition: all 0.15s;
-        }
-
-        .structure-item .structure-delete:hover {
-            background: #fee2e2;
-            color: #ef4444;
-        }
-
-        .structure-item.active .structure-delete:hover {
-            background: rgba(255,255,255,0.2);
-            color: white;
-        }
-
-        .clear-all-btn {
-            width: 100%;
-            padding: 8px;
-            background: #f8fafc;
-            border: 1px solid #e5e7eb;
-            border-radius: 6px;
-            font-size: 12px;
-            color: #6b7280;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            transition: all 0.15s;
-        }
-
-        .clear-all-btn:hover {
-            background: #fee2e2;
-            border-color: #ef4444;
-            color: #ef4444;
-        }
-
         /* Main Viewer Area */
         .viewer-main {
             flex: 1;
@@ -275,9 +165,9 @@
         /* Selection Info - Small badge */
         .selection-info-badge {
             position: absolute;
-            bottom: 100px;
-            right: 16px;
-            background: rgba(76, 175, 80, 0.95);
+            bottom: 120px;
+            right: 80px;
+            background: rgba(76, 175, 80, 0.9);
             color: white;
             padding: 6px 12px;
             border-radius: 16px;
@@ -292,16 +182,88 @@
             display: block;
         }
 
-        /* Top Controls Container */
-        .top-controls {
+        /* Top Left Controls - All in one row */
+        .top-left-controls {
             position: absolute;
-            top: 16px;
-            right: 16px;
+            top: 24px;
+            left: 28px;
             display: flex;
             flex-direction: row;
             align-items: center;
             gap: 12px;
             z-index: 100;
+        }
+
+        /* Top Right Container - Color palette + structure tags below */
+        .top-right-container {
+            position: absolute;
+            top: 24px;
+            right: 28px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 20px;
+            z-index: 100;
+        }
+
+        /* Floating Structure Tags - Below color palette */
+        .floating-structures {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 6px;
+        }
+
+        .structure-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 14px;
+            min-width: 80px;
+            background: rgba(255, 255, 255, 0.85);
+            color: #333;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+            border: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .structure-tag:hover {
+            background: rgba(255, 255, 255, 0.95);
+        }
+
+        .structure-tag.active {
+            background: rgba(255, 255, 255, 0.95);
+            box-shadow: 0 0 0 2px var(--accent-primary), 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .structure-tag .tag-download,
+        .structure-tag .tag-delete {
+            width: 18px;
+            height: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.1);
+            border: none;
+            border-radius: 4px;
+            color: #666;
+            font-size: 10px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .structure-tag .tag-download:hover {
+            background: var(--accent-primary);
+            color: white;
+        }
+
+        .structure-tag .tag-delete:hover {
+            background: rgba(0, 0, 0, 0.2);
+            color: #333;
         }
 
         /* Color Palette - Horizontal */
@@ -350,6 +312,29 @@
             transform: scale(1.15);
         }
 
+        .palette-chain-btn {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid rgba(255, 255, 255, 0.8);
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+            transition: all 0.15s ease;
+            background: linear-gradient(135deg, #5C8EBF 0%, #6AAF6A 33%, #E8A838 66%, #D46A6A 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            color: white;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+            margin-left: 4px;
+        }
+
+        .palette-chain-btn:hover {
+            transform: scale(1.15);
+            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25);
+        }
+
         /* Right Controls */
         .right-controls {
             display: flex;
@@ -362,8 +347,8 @@
         }
 
         .control-btn {
-            width: 32px;
-            height: 32px;
+            width: 28px;
+            height: 28px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -373,7 +358,7 @@
             color: var(--text-primary);
             cursor: pointer;
             transition: all 0.2s ease;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 700;
         }
 
@@ -387,6 +372,12 @@
             background: var(--accent-primary);
             color: white;
             border-color: var(--accent-primary);
+        }
+
+        .control-btn-danger:hover {
+            background: #ef4444;
+            color: white;
+            border-color: #ef4444;
         }
 
         /* Loading Overlay */
@@ -719,48 +710,38 @@
             font-size: 14px;
         }
 
-        /* Show/Hide Controls - Top Left */
+        /* Show/Hide Controls - Inline with other controls */
         .show-hide-controls {
-            position: absolute;
-            top: 12px;
-            left: 12px;
-            background: none;
-            border-radius: 0;
-            padding: 0;
-            box-shadow: none;
-            z-index: 100;
             display: flex;
-            gap: 16px;
+            flex-direction: row;
+            align-items: center;
+            gap: 8px;
         }
 
         .sh-group {
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             align-items: center;
-            gap: 4px;
+            gap: 3px;
         }
 
         .sh-group-label {
             font-size: 11px;
             font-weight: 600;
-            color: #555;
-        }
-
-        .sh-group-btns {
-            display: flex;
-            gap: 4px;
+            color: #666;
+            margin-right: 2px;
         }
 
         .sh-btn {
-            width: 26px;
-            height: 26px;
+            width: 28px;
+            height: 28px;
             border: none;
             border-radius: 6px;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            font-size: 12px;
+            font-size: 11px;
             transition: all 0.15s ease;
         }
 
@@ -782,6 +763,13 @@
         .sh-btn.hide-btn:hover {
             background: #999;
             color: white;
+        }
+
+        .sh-separator {
+            width: 1px;
+            height: 20px;
+            background: #ddd;
+            margin: 0 4px;
         }
     </style>
 </head>
@@ -809,16 +797,6 @@
             </div>
         </div>
 
-        <!-- Loaded Structures List -->
-        <div class="structures-section">
-            <h3><i class="fas fa-layer-group"></i> Loaded Structures</h3>
-            <div id="structuresList" class="structures-list">
-                <div class="no-structures">No structures loaded</div>
-            </div>
-            <button class="clear-all-btn" onclick="clearAllStructures()" title="Clear All">
-                <i class="fas fa-trash-alt"></i> Clear All
-            </button>
-        </div>
     </div>
 
     <!-- Main Viewer Area -->
@@ -833,37 +811,45 @@
                 <span>Loading...</span>
             </div>
 
-            <!-- Show/Hide Controls - Top Left -->
-            <div class="show-hide-controls">
-                <div class="sh-group">
-                    <span class="sh-group-label">Atoms</span>
-                    <div class="sh-group-btns">
-                        <button class="sh-btn show-btn" onclick="showRepresentation('atoms')" title="Show Atoms"><i class="fas fa-eye"></i></button>
-                        <button class="sh-btn hide-btn" onclick="hideRepresentation('atoms')" title="Hide Atoms"><i class="fas fa-eye-slash"></i></button>
-                    </div>
+            <!-- Top Left Controls: Buttons + Show/Hide -->
+            <div class="top-left-controls">
+                <!-- Control Buttons -->
+                <div class="right-controls">
+                    <button class="control-btn" onclick="resetView()" title="Reset View">
+                        <i class="fas fa-home"></i>
+                    </button>
+                    <button class="control-btn" onclick="takeScreenshot()" title="Screenshot">
+                        <i class="fas fa-camera"></i>
+                    </button>
+                    <button class="control-btn control-btn-danger" onclick="clearAllStructures()" title="Clear All">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
                 </div>
-                <div class="sh-group">
-                    <span class="sh-group-label">Cartoon</span>
-                    <div class="sh-group-btns">
-                        <button class="sh-btn show-btn" onclick="showRepresentation('cartoon')" title="Show Cartoon"><i class="fas fa-eye"></i></button>
-                        <button class="sh-btn hide-btn" onclick="hideRepresentation('cartoon')" title="Hide Cartoon"><i class="fas fa-eye-slash"></i></button>
+
+                <div class="sh-separator"></div>
+
+                <!-- Show/Hide Controls -->
+                <div class="show-hide-controls">
+                    <div class="sh-group">
+                        <span class="sh-group-label">Atoms</span>
+                        <button class="sh-btn show-btn" onclick="showRepresentation('atoms')" title="Show"><i class="fas fa-eye"></i></button>
+                        <button class="sh-btn hide-btn" onclick="hideRepresentation('atoms')" title="Hide"><i class="fas fa-eye-slash"></i></button>
                     </div>
-                </div>
-                <div class="sh-group">
-                    <span class="sh-group-label">Surface</span>
-                    <div class="sh-group-btns">
-                        <button class="sh-btn show-btn" onclick="showRepresentation('surface')" title="Show Surface"><i class="fas fa-eye"></i></button>
-                        <button class="sh-btn hide-btn" onclick="hideRepresentation('surface')" title="Hide Surface"><i class="fas fa-eye-slash"></i></button>
+                    <div class="sh-group">
+                        <span class="sh-group-label">Cartoon</span>
+                        <button class="sh-btn show-btn" onclick="showRepresentation('cartoon')" title="Show"><i class="fas fa-eye"></i></button>
+                        <button class="sh-btn hide-btn" onclick="hideRepresentation('cartoon')" title="Hide"><i class="fas fa-eye-slash"></i></button>
+                    </div>
+                    <div class="sh-group">
+                        <span class="sh-group-label">Surface</span>
+                        <button class="sh-btn show-btn" onclick="showRepresentation('surface')" title="Show"><i class="fas fa-eye"></i></button>
+                        <button class="sh-btn hide-btn" onclick="hideRepresentation('surface')" title="Hide"><i class="fas fa-eye-slash"></i></button>
                     </div>
                 </div>
             </div>
 
-
-            <!-- Selection Info Badge -->
-            <div class="selection-info-badge" id="selectionBadge"></div>
-
-            <!-- Top Controls Container -->
-            <div class="top-controls">
+            <!-- Top Right: Color Palette + Structure Tags -->
+            <div class="top-right-container">
                 <!-- Color Palette -->
                 <div class="color-palette-floating">
                     <div class="palette-color" style="background: #5C8EBF;" onclick="applyPaletteColor('#5C8EBF')"></div>
@@ -878,21 +864,19 @@
                         <i class="fas fa-plus"></i>
                     </div>
                     <input type="color" id="colorPicker" style="display: none;" onchange="applyCustomColor(this.value)">
+                    <div class="palette-chain-btn" onclick="applyChainColor()" title="Color by Chain">
+                        <i class="fas fa-link"></i>
+                    </div>
                 </div>
 
-                <!-- Right Controls -->
-                <div class="right-controls">
-                    <button class="control-btn" onclick="resetView()" title="Reset View">
-                        <i class="fas fa-home"></i>
-                    </button>
-                    <button class="control-btn" onclick="toggleSpin()" id="spinBtn" title="Auto Spin">
-                        <i class="fas fa-sync-alt"></i>
-                    </button>
-                    <button class="control-btn" onclick="takeScreenshot()" title="Screenshot">
-                        <i class="fas fa-camera"></i>
-                    </button>
+                <!-- Floating Structure Tags -->
+                <div class="floating-structures" id="floatingStructures">
+                    <!-- Structure tags will be populated here -->
                 </div>
             </div>
+
+            <!-- Selection Info Badge -->
+            <div class="selection-info-badge" id="selectionBadge"></div>
 
             <!-- Sequence Panel - Floating -->
             <div class="sequence-panel">
