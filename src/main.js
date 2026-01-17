@@ -513,11 +513,12 @@ function buildSelectionLoci(structure) {
 }
 
 function updateSelectionInfo() {
-    const textEl = document.getElementById('selectionText');
-    if (!textEl) return;
+    const badge = document.getElementById('selectionBadge');
+    if (!badge) return;
 
     if (selectedResidues.size === 0) {
-        textEl.textContent = '-';
+        badge.classList.remove('visible');
+        badge.textContent = '';
         return;
     }
 
@@ -544,10 +545,11 @@ function updateSelectionInfo() {
             }
         }
         ranges.push(start === end ? `${start}` : `${start}-${end}`);
-        parts.push(`Chain ${chain}: ${ranges.join(', ')}`);
+        parts.push(`${chain} (${ranges.join(', ')})`);
     });
 
-    textEl.textContent = parts.join('\n');
+    badge.textContent = parts.join(' | ');
+    badge.classList.add('visible');
 }
 
 async function deselectAll() {

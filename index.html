@@ -270,137 +270,95 @@
             bottom: 0 !important;
         }
 
-        /* Selection Info - Bottom Right Floating */
-        .selection-floating {
-            position: absolute;
-            bottom: 100px;
-            right: 80px;
-            z-index: 100;
-            font-size: 12px;
-            color: #333;
-            text-align: right;
-            max-width: 200px;
-        }
 
-        .selection-floating .label {
-            font-weight: 600;
-            margin-bottom: 4px;
-            color: #666;
-        }
 
-        .selection-floating .value {
-            word-break: break-all;
-            white-space: pre-line;
-            color: #333;
-        }
-
-        .selection-floating .deselect-btn {
-            margin-top: 8px;
-            font-size: 11px;
-            padding: 4px 10px;
-            background: rgba(0, 0, 0, 0.1);
-            border: 1px solid rgba(0, 0, 0, 0.2);
-            border-radius: 4px;
-            color: #333;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .selection-floating .deselect-btn:hover {
-            background: rgba(0, 0, 0, 0.2);
-        }
-
-        /* Selection Groups Panel */
-        .selection-groups {
+        /* Selection Info - Small badge */
+        .selection-info-badge {
             position: absolute;
             bottom: 100px;
             right: 16px;
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            padding: 8px 6px;
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 12px;
-            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
-            backdrop-filter: blur(12px);
-            z-index: 100;
-        }
-
-        .group-btn {
-            width: 28px;
-            height: 28px;
-            border-radius: 6px;
-            border: 1px solid rgba(0, 0, 0, 0.15);
-            background: white;
-            cursor: pointer;
+            background: rgba(76, 175, 80, 0.95);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 16px;
             font-size: 12px;
-            font-weight: 600;
-            color: #555;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.15s ease;
+            font-weight: 500;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+            z-index: 100;
+            display: none;
         }
 
-        .group-btn:hover {
-            background: #f0f0f0;
-            border-color: var(--accent-primary);
+        .selection-info-badge.visible {
+            display: block;
         }
 
-        .group-btn.active {
-            background: var(--accent-primary);
-            border-color: var(--accent-primary);
-            color: white;
-        }
-
-        .group-btn.sel-btn {
-            font-size: 9px;
-            background: #f0f8ff;
-            border-color: var(--accent-primary);
-            color: var(--accent-primary);
-        }
-
-        .group-btn.sel-btn.has-selection {
-            background: var(--accent-primary);
-            color: white;
-        }
-
-        .group-btn.sel-btn.empty {
-            opacity: 0.4;
-            border-style: dashed;
-        }
-
-        .group-btn.add-btn {
-            border-style: dashed;
-            color: #999;
-        }
-
-        .group-btn.add-btn:hover {
-            border-color: var(--accent-primary);
-            color: var(--accent-primary);
-        }
-
-        .group-divider {
-            width: 20px;
-            height: 1px;
-            background: rgba(0, 0, 0, 0.1);
-            margin: 2px auto;
-        }
-
-        /* Right Controls */
-        .right-controls {
+        /* Top Controls Container */
+        .top-controls {
             position: absolute;
             top: 16px;
             right: 16px;
             display: flex;
-            flex-direction: column;
-            gap: 4px;
+            flex-direction: row;
+            align-items: center;
+            gap: 12px;
             z-index: 100;
-            background: rgba(255, 255, 255, 0.97);
-            border-radius: 10px;
-            padding: 10px;
-            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
-            backdrop-filter: blur(12px);
+        }
+
+        /* Color Palette - Horizontal */
+        .color-palette-floating {
+            display: flex;
+            flex-direction: row;
+            gap: 6px;
+            padding: 0;
+            background: none;
+            border-radius: 0;
+            box-shadow: none;
+        }
+
+        .palette-color {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid rgba(255, 255, 255, 0.8);
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+            transition: all 0.15s ease;
+        }
+
+        .palette-color:hover {
+            transform: scale(1.15);
+            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25);
+        }
+
+        .palette-color.active {
+            border: 2px solid var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(62, 132, 168, 0.3);
+            transform: scale(1.1);
+        }
+
+        .palette-custom {
+            background: linear-gradient(135deg, #ff6b6b, #feca57, #48dbfb, #ff9ff3) !important;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: white;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+        }
+
+        .palette-custom:hover {
+            transform: scale(1.15);
+        }
+
+        /* Right Controls */
+        .right-controls {
+            display: flex;
+            flex-direction: row;
+            gap: 4px;
+            background: none;
+            border-radius: 0;
+            padding: 0;
+            box-shadow: none;
         }
 
         .control-btn {
@@ -429,64 +387,6 @@
             background: var(--accent-primary);
             color: white;
             border-color: var(--accent-primary);
-        }
-
-        .control-divider {
-            width: 100%;
-            height: 1px;
-            background: rgba(200, 216, 216, 0.5);
-            margin: 4px 0;
-        }
-
-        /* Color Palette - Floating - aligned to bottom of right controls */
-        .color-palette-floating {
-            position: absolute;
-            top: 16px;
-            right: 80px;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            padding: 10px 8px;
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
-            backdrop-filter: blur(12px);
-            z-index: 100;
-        }
-
-        .palette-color {
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            cursor: pointer;
-            border: 2px solid rgba(255, 255, 255, 0.8);
-            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
-            transition: all 0.15s ease;
-        }
-
-        .palette-color:hover {
-            transform: scale(1.2);
-            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25);
-        }
-
-        .palette-color.active {
-            border: 2px solid var(--accent-primary);
-            box-shadow: 0 0 0 3px rgba(62, 132, 168, 0.3);
-            transform: scale(1.1);
-        }
-
-        .palette-custom {
-            background: linear-gradient(135deg, #ff6b6b, #feca57, #48dbfb, #ff9ff3) !important;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 10px;
-            color: white;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
-        }
-
-        .palette-custom:hover {
-            transform: scale(1.2);
         }
 
         /* Loading Overlay */
@@ -824,48 +724,43 @@
             position: absolute;
             top: 12px;
             left: 12px;
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 8px;
-            padding: 8px 10px;
-            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
-            backdrop-filter: blur(12px);
+            background: none;
+            border-radius: 0;
+            padding: 0;
+            box-shadow: none;
             z-index: 100;
+            display: flex;
+            gap: 16px;
         }
 
-        .sh-table {
-            border-collapse: collapse;
+        .sh-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
         }
 
-        .sh-table th {
-            font-size: 10px;
+        .sh-group-label {
+            font-size: 11px;
             font-weight: 600;
             color: #555;
-            padding: 0 8px 4px 8px;
-            text-align: center;
         }
 
-        .sh-table td {
-            padding: 2px 8px;
-            text-align: center;
-        }
-
-        .sh-label {
-            font-size: 10px;
-            color: #777;
-            text-align: right !important;
-            padding-right: 8px !important;
+        .sh-group-btns {
+            display: flex;
+            gap: 4px;
         }
 
         .sh-btn {
             width: 26px;
             height: 26px;
             border: none;
-            border-radius: 4px;
+            border-radius: 6px;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            font-size: 11px;
+            font-size: 12px;
             transition: all 0.15s ease;
         }
 
@@ -880,12 +775,12 @@
         }
 
         .sh-btn.hide-btn {
-            background: #fce4ec;
-            color: #e91e63;
+            background: #f0f0f0;
+            color: #888;
         }
 
         .sh-btn.hide-btn:hover {
-            background: #e91e63;
+            background: #999;
             color: white;
         }
     </style>
@@ -940,89 +835,63 @@
 
             <!-- Show/Hide Controls - Top Left -->
             <div class="show-hide-controls">
-                <table class="sh-table">
-                    <thead>
-                        <tr>
-                            <th></th>
-                            <th>Atoms</th>
-                            <th>Cartoon</th>
-                            <th>Surface</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td class="sh-label">Show</td>
-                            <td><button class="sh-btn show-btn" onclick="showRepresentation('atoms')" title="Show Atoms"><i class="fas fa-eye"></i></button></td>
-                            <td><button class="sh-btn show-btn" onclick="showRepresentation('cartoon')" title="Show Cartoon"><i class="fas fa-eye"></i></button></td>
-                            <td><button class="sh-btn show-btn" onclick="showRepresentation('surface')" title="Show Surface"><i class="fas fa-eye"></i></button></td>
-                        </tr>
-                        <tr>
-                            <td class="sh-label">Hide</td>
-                            <td><button class="sh-btn hide-btn" onclick="hideRepresentation('atoms')" title="Hide Atoms"><i class="fas fa-eye-slash"></i></button></td>
-                            <td><button class="sh-btn hide-btn" onclick="hideRepresentation('cartoon')" title="Hide Cartoon"><i class="fas fa-eye-slash"></i></button></td>
-                            <td><button class="sh-btn hide-btn" onclick="hideRepresentation('surface')" title="Hide Surface"><i class="fas fa-eye-slash"></i></button></td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <!-- Selection Groups Panel -->
-            <div class="selection-groups" id="selectionGroups">
-                <div id="groupList"></div>
-                <div class="group-divider" id="groupDivider" style="display: none;"></div>
-                <button class="group-btn sel-btn" id="selBtn" title="Current Selection">Sel</button>
-                <button class="group-btn add-btn" onclick="saveCurrentSelectionAsGroup()" title="Save Selection as Group">+</button>
-            </div>
-
-            <!-- Selection Info - Bottom Right Floating -->
-            <div class="selection-floating" id="selectionInfo">
-                <div class="label">Selection</div>
-                <div class="value" id="selectionText">-</div>
-                <button class="deselect-btn" onclick="deselectAll()">Deselect All</button>
-            </div>
-
-            <!-- Right Controls -->
-            <div class="right-controls">
-                <!-- View Controls -->
-                <button class="control-btn" onclick="resetView()" title="Reset View">
-                    <i class="fas fa-home"></i>
-                </button>
-                <button class="control-btn" onclick="toggleSpin()" id="spinBtn" title="Auto Spin">
-                    <i class="fas fa-sync-alt"></i>
-                </button>
-                <button class="control-btn" onclick="takeScreenshot()" title="Screenshot">
-                    <i class="fas fa-camera"></i>
-                </button>
-
-                <div class="control-divider"></div>
-
-                <!-- Secondary Structure Coloring Button -->
-                <button class="control-btn" onclick="applySecondaryStructureColoring()" title="Secondary Structure Colors">
-                    <i class="fas fa-palette"></i>
-                </button>
-
-                <div class="control-divider"></div>
-
-                <!-- Outline Toggle -->
-                <button class="control-btn active" onclick="toggleOutline()" id="outlineBtn" title="Outline">
-                    <i class="fas fa-adjust"></i>
-                </button>
-            </div>
-
-            <!-- Color Palette - Floating -->
-            <div class="color-palette-floating">
-                <div class="palette-color" style="background: #5C8EBF;" onclick="applyPaletteColor('#5C8EBF')"></div>
-                <div class="palette-color" style="background: #6AAF6A;" onclick="applyPaletteColor('#6AAF6A')"></div>
-                <div class="palette-color" style="background: #D46A6A;" onclick="applyPaletteColor('#D46A6A')"></div>
-                <div class="palette-color" style="background: #E8A838;" onclick="applyPaletteColor('#E8A838')"></div>
-                <div class="palette-color" style="background: #9B7BB8;" onclick="applyPaletteColor('#9B7BB8')"></div>
-                <div class="palette-color" style="background: #888888;" onclick="applyPaletteColor('#888888')"></div>
-                <div class="palette-color" style="background: #D4A76A;" onclick="applyPaletteColor('#D4A76A')"></div>
-                <div class="palette-color" style="background: #6AB8B8;" onclick="applyPaletteColor('#6AB8B8')"></div>
-                <div class="palette-color palette-custom" onclick="openColorPicker()">
-                    <i class="fas fa-plus"></i>
+                <div class="sh-group">
+                    <span class="sh-group-label">Atoms</span>
+                    <div class="sh-group-btns">
+                        <button class="sh-btn show-btn" onclick="showRepresentation('atoms')" title="Show Atoms"><i class="fas fa-eye"></i></button>
+                        <button class="sh-btn hide-btn" onclick="hideRepresentation('atoms')" title="Hide Atoms"><i class="fas fa-eye-slash"></i></button>
+                    </div>
                 </div>
-                <input type="color" id="colorPicker" style="display: none;" onchange="applyCustomColor(this.value)">
+                <div class="sh-group">
+                    <span class="sh-group-label">Cartoon</span>
+                    <div class="sh-group-btns">
+                        <button class="sh-btn show-btn" onclick="showRepresentation('cartoon')" title="Show Cartoon"><i class="fas fa-eye"></i></button>
+                        <button class="sh-btn hide-btn" onclick="hideRepresentation('cartoon')" title="Hide Cartoon"><i class="fas fa-eye-slash"></i></button>
+                    </div>
+                </div>
+                <div class="sh-group">
+                    <span class="sh-group-label">Surface</span>
+                    <div class="sh-group-btns">
+                        <button class="sh-btn show-btn" onclick="showRepresentation('surface')" title="Show Surface"><i class="fas fa-eye"></i></button>
+                        <button class="sh-btn hide-btn" onclick="hideRepresentation('surface')" title="Hide Surface"><i class="fas fa-eye-slash"></i></button>
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Selection Info Badge -->
+            <div class="selection-info-badge" id="selectionBadge"></div>
+
+            <!-- Top Controls Container -->
+            <div class="top-controls">
+                <!-- Color Palette -->
+                <div class="color-palette-floating">
+                    <div class="palette-color" style="background: #5C8EBF;" onclick="applyPaletteColor('#5C8EBF')"></div>
+                    <div class="palette-color" style="background: #6AAF6A;" onclick="applyPaletteColor('#6AAF6A')"></div>
+                    <div class="palette-color" style="background: #D46A6A;" onclick="applyPaletteColor('#D46A6A')"></div>
+                    <div class="palette-color" style="background: #E8A838;" onclick="applyPaletteColor('#E8A838')"></div>
+                    <div class="palette-color" style="background: #9B7BB8;" onclick="applyPaletteColor('#9B7BB8')"></div>
+                    <div class="palette-color" style="background: #888888;" onclick="applyPaletteColor('#888888')"></div>
+                    <div class="palette-color" style="background: #D4A76A;" onclick="applyPaletteColor('#D4A76A')"></div>
+                    <div class="palette-color" style="background: #6AB8B8;" onclick="applyPaletteColor('#6AB8B8')"></div>
+                    <div class="palette-color palette-custom" onclick="openColorPicker()">
+                        <i class="fas fa-plus"></i>
+                    </div>
+                    <input type="color" id="colorPicker" style="display: none;" onchange="applyCustomColor(this.value)">
+                </div>
+
+                <!-- Right Controls -->
+                <div class="right-controls">
+                    <button class="control-btn" onclick="resetView()" title="Reset View">
+                        <i class="fas fa-home"></i>
+                    </button>
+                    <button class="control-btn" onclick="toggleSpin()" id="spinBtn" title="Auto Spin">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                    <button class="control-btn" onclick="takeScreenshot()" title="Screenshot">
+                        <i class="fas fa-camera"></i>
+                    </button>
+                </div>
             </div>
 
             <!-- Sequence Panel - Floating -->
