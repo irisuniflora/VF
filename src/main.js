@@ -1083,19 +1083,40 @@ function applyCustomColor(hexColor) {
     applyPaletteColor(hexColor);
 }
 
-// Custom chain color palette - 10 visually distinct, beautiful colors
+// Chain color palette - 20 beautiful, visually distinct colors
+// Combining Paul Tol's colorblind-friendly palette with scientific visualization standards
 const CHAIN_COLOR_PALETTE = [
-    '#5C8EBF',  // Blue
-    '#6AAF6A',  // Green
-    '#E8A838',  // Orange/Gold
-    '#D46A6A',  // Red/Coral
-    '#9B7BB8',  // Purple
-    '#6AB8B8',  // Teal/Cyan
-    '#D4A76A',  // Tan/Brown
-    '#E57DAD',  // Pink
-    '#7B9E5A',  // Olive Green
-    '#8B7355',  // Brown
+    '#4477AA',  // Tol Blue
+    '#66CCEE',  // Tol Cyan
+    '#228833',  // Tol Green
+    '#44AA99',  // Tol Teal
+    '#CCBB44',  // Tol Yellow
+    '#EE7733',  // Tol Orange
+    '#EE6677',  // Tol Red
+    '#AA3377',  // Tol Pink
+    '#332288',  // Tol Purple
+    '#1E90FF',  // Dodger Blue
+    '#FA8072',  // Salmon
+    '#FFD700',  // Gold
+    '#DA70D6',  // Orchid
+    '#228B22',  // Forest Green
+    '#FF7F50',  // Coral
+    '#4682B4',  // Steel Blue
+    '#9370DB',  // Medium Purple
+    '#2E8B57',  // Sea Green
+    '#FF6347',  // Tomato
+    '#6A5ACD',  // Slate Blue
 ];
+
+// Fisher-Yates shuffle - returns a new shuffled array
+function shuffleArray(array) {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+}
 
 // Apply chain-based coloring with custom palette
 async function applyChainColor() {
@@ -1124,9 +1145,12 @@ async function applyChainColor() {
         const chains = [...new Set(sequenceData.map(r => r.chain))];
         console.log(`applyChainColor: Found ${chains.length} chains:`, chains);
 
+        // Shuffle colors for variety each time
+        const shuffledColors = shuffleArray(CHAIN_COLOR_PALETTE);
+
         // Assign colors to each chain's residues
         chains.forEach((chain, index) => {
-            const color = CHAIN_COLOR_PALETTE[index % CHAIN_COLOR_PALETTE.length];
+            const color = shuffledColors[index % shuffledColors.length];
             sequenceData.forEach(res => {
                 if (res.chain === chain) {
                     residueColorMap.set(`${res.chain}:${res.resno}`, color);
