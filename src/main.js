@@ -52,6 +52,15 @@ let currentChainFilter = '';
 let isSelecting = false;
 let selectionStart = null;
 
+// Track which residues have each representation visible (separate from color)
+let atomsVisibleResidues = new Set();
+let cartoonVisibleResidues = new Set();  // empty = show all, has items = show only those
+let surfaceVisibleResidues = new Set();  // empty = show all, has items = show only those
+
+// Track if we're in "partial" mode (only selected residues have repr) vs "full" mode (all residues)
+let cartoonPartialMode = false;
+let surfacePartialMode = false;
+
 // Amino acid mappings
 const AA_MAP = {
     'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D', 'CYS': 'C',
@@ -91,19 +100,30 @@ async function initViewer() {
 
     plugin = viewer.plugin;
 
-    // Set highlight color to bright green/yellow for visibility
+    // Set highlight/selection to edge-only (preserve original colors)
     if (plugin.canvas3d) {
         plugin.canvas3d.setProps({
             renderer: {
-                selectColor: Color(0x00FF00),      // Bright green for selection
-                highlightColor: Color(0xFFFF00),   // Yellow for highlight
+                // Make select/highlight colors transparent (only edge will show)
+                selectColor: Color(0x00FF00),
+                highlightColor: Color(0xFFFF00),
             },
             marking: {
                 enabled: true,
                 highlightEdgeColor: Color(0xFFFF00),
                 selectEdgeColor: Color(0x00FF00),
-                highlightEdgeStrength: 1,
-                selectEdgeStrength: 1,
+                highlightEdgeStrength: 1.5,
+                selectEdgeStrength: 1.5,
+                // Use edge-only marking (no fill color change)
+                ghostEdgeStrength: 0,
+            }
+        });
+
+        // Override selection/highlight blend to minimal (keep original color)
+        plugin.canvas3d.setProps({
+            renderer: {
+                selectStrength: 0,      // No color blend for selection
+                highlightStrength: 0,   // No color blend for highlight
             }
         });
     }
@@ -119,6 +139,11 @@ async function initViewer() {
             console.log('Empty space clicked - clearing selection');
             await deselectAll();
         }
+    });
+
+    // Add hover listener for residue info display
+    plugin.behaviors.interaction.hover.subscribe((event) => {
+        updateHoverInfo(event);
     });
 
     console.log('Mol* Viewer initialized');
@@ -356,8 +381,9 @@ function displaySequence() {
         const isSelected = selectedResidues.has(key);
         const propertyClass = AA_PROPERTY[res.aa] || 'other';
         const showNumber = res.resno % 10 === 0;
+        const isDecade = res.resno % 10 === 0;
 
-        html += `<span class="sequence-residue ${isSelected ? 'selected' : ''} ${propertyClass}"
+        html += `<span class="sequence-residue ${isSelected ? 'selected' : ''} ${propertyClass} ${isDecade ? 'decade-end' : ''}"
                        data-chain="${res.chain}"
                        data-resno="${res.resno}"
                        data-index="${index}">
@@ -559,6 +585,207 @@ function updateSelectionInfo() {
     badge.classList.add('visible');
 }
 
+// Backbone atom names
+const BACKBONE_ATOMS = new Set(['N', 'CA', 'C', 'O', 'H', 'HA']);
+
+// Get atom info from unit and atom index
+function getAtomInfo(unit, atomIndex) {
+    const model = unit.model;
+    const hierarchy = model.atomicHierarchy;
+
+    const residueIndex = hierarchy.residueAtomSegments.index[atomIndex];
+    const chainIndex = hierarchy.chainAtomSegments.index[atomIndex];
+
+    const resName = hierarchy.atoms.auth_comp_id.value(atomIndex);
+    const resNum = hierarchy.residues.auth_seq_id.value(residueIndex);
+    const chainId = hierarchy.chains.auth_asym_id.value(chainIndex);
+    const atomName = hierarchy.atoms.auth_atom_id.value(atomIndex);
+
+    const isBackbone = BACKBONE_ATOMS.has(atomName);
+
+    // Get coordinates
+    const conformation = unit.conformation;
+    const x = conformation.x(atomIndex);
+    const y = conformation.y(atomIndex);
+    const z = conformation.z(atomIndex);
+
+    return {
+        resName,
+        resNum,
+        chainId,
+        atomName,
+        isBackbone,
+        x, y, z,
+        label: `${resName} ${resNum}`,
+        fullLabel: `${chainId}:${resName} ${resNum} (${atomName})`
+    };
+}
+
+// Calculate distance between two atoms
+function calcDistance(atom1, atom2) {
+    const dx = atom1.x - atom2.x;
+    const dy = atom1.y - atom2.y;
+    const dz = atom1.z - atom2.z;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+// Classify interaction type based on atoms involved
+function classifyInteraction(atom1Info, atom2Info, distance) {
+    const a1 = atom1Info.atomName;
+    const a2 = atom2Info.atomName;
+
+    // Check for hydrogen bond (N-H...O or O-H...O patterns)
+    const isHBondDonor = (name) => name === 'N' || name === 'NE' || name === 'NH1' || name === 'NH2' ||
+                                   name === 'NZ' || name === 'ND1' || name === 'ND2' || name === 'NE1' ||
+                                   name === 'NE2' || name === 'OG' || name === 'OG1' || name === 'OH';
+    const isHBondAcceptor = (name) => name === 'O' || name === 'OD1' || name === 'OD2' || name === 'OE1' ||
+                                      name === 'OE2' || name === 'OG' || name === 'OG1' || name === 'OH' ||
+                                      name === 'ND1' || name === 'NE2';
+
+    // Salt bridge check (charged residues)
+    const positiveRes = ['ARG', 'LYS', 'HIS'];
+    const negativeRes = ['ASP', 'GLU'];
+    const isPositive1 = positiveRes.includes(atom1Info.resName) && (a1.startsWith('N') && a1 !== 'N');
+    const isNegative1 = negativeRes.includes(atom1Info.resName) && a1.startsWith('O') && a1 !== 'O';
+    const isPositive2 = positiveRes.includes(atom2Info.resName) && (a2.startsWith('N') && a2 !== 'N');
+    const isNegative2 = negativeRes.includes(atom2Info.resName) && a2.startsWith('O') && a2 !== 'O';
+
+    if ((isPositive1 && isNegative2) || (isNegative1 && isPositive2)) {
+        if (distance < 4.0) {
+            return { type: 'salt-bridge', label: 'Salt Bridge', color: '#FF6B6B' };
+        }
+    }
+
+    // Hydrogen bond
+    if ((isHBondDonor(a1) && isHBondAcceptor(a2)) || (isHBondAcceptor(a1) && isHBondDonor(a2))) {
+        if (distance < 3.5) {
+            // Backbone H-bond
+            if (atom1Info.isBackbone && atom2Info.isBackbone) {
+                return { type: 'h-bond-backbone', label: 'H-bond', color: '#888888' };
+            }
+            // Sidechain H-bond
+            return { type: 'h-bond-sidechain', label: 'H-bond', color: '#4ECDC4' };
+        }
+    }
+
+    // Hydrophobic contact
+    const hydrophobicRes = ['ALA', 'VAL', 'LEU', 'ILE', 'MET', 'PHE', 'TRP', 'PRO'];
+    const hydrophobicAtoms = (name) => name.startsWith('C') && name !== 'C' && name !== 'CA';
+    if (hydrophobicRes.includes(atom1Info.resName) && hydrophobicRes.includes(atom2Info.resName)) {
+        if (hydrophobicAtoms(a1) && hydrophobicAtoms(a2) && distance < 4.5) {
+            return { type: 'hydrophobic', label: 'Hydrophobic', color: '#F7DC6F' };
+        }
+    }
+
+    // Pi-Pi stacking (aromatic residues)
+    const aromaticRes = ['PHE', 'TYR', 'TRP', 'HIS'];
+    if (aromaticRes.includes(atom1Info.resName) && aromaticRes.includes(atom2Info.resName)) {
+        if (distance < 5.5) {
+            return { type: 'pi-pi', label: 'π-π', color: '#BB8FCE' };
+        }
+    }
+
+    // Default: Van der Waals contact
+    return { type: 'vdw', label: 'VdW', color: '#95A5A6' };
+}
+
+// Update hover info display
+function updateHoverInfo(event) {
+    const hoverInfo = document.getElementById('hoverInfo');
+    if (!hoverInfo) return;
+
+    if (!event.current || !event.current.loci) {
+        hoverInfo.classList.remove('visible');
+        return;
+    }
+
+    const loci = event.current.loci;
+
+    try {
+        // Handle data-loci with interactions tag (non-covalent interaction lines)
+        if (loci.kind === 'data-loci' && loci.tag === 'interactions') {
+            const elements = loci.elements;
+
+            if (elements && elements.length >= 1) {
+                // elements[0] has structure: {unitA, indexA, unitB, indexB}
+                const loc = elements[0];
+                const unitA = loc.unitA;
+                const unitB = loc.unitB;
+                const indexA = loc.indexA;
+                const indexB = loc.indexB;
+
+                if (unitA && unitB) {
+                    // indexA/indexB are element indices, get actual atom indices
+                    const atomIndexA = unitA.elements[indexA];
+                    const atomIndexB = unitB.elements[indexB];
+
+                    const atom1 = getAtomInfo(unitA, atomIndexA);
+                    const atom2 = getAtomInfo(unitB, atomIndexB);
+
+                    // Calculate actual distance
+                    const distance = calcDistance(atom1, atom2);
+                    const interaction = classifyInteraction(atom1, atom2, distance);
+                    const distStr = distance.toFixed(1) + ' Å';
+
+                    // A (VAL 8) ─ VdW ─ A (ARG 10) · 3.8 Å
+                    hoverInfo.innerHTML = `
+                        <span class="chain-label">${atom1.chainId}</span>
+                        (<span class="residue-name">${atom1.resName}</span> <span class="residue-num">${atom1.resNum}</span>)
+                        <span style="color:${interaction.color}; margin:0 4px">─ ${interaction.label} ─</span>
+                        <span class="chain-label">${atom2.chainId}</span>
+                        (<span class="residue-name">${atom2.resName}</span> <span class="residue-num">${atom2.resNum}</span>)
+                        · <span style="color:#aaa; font-size:11px">${distStr}</span>
+                    `;
+                    hoverInfo.classList.add('visible');
+                    return;
+                }
+            }
+        }
+
+        // Handle element loci (normal residue/atom hover)
+        if (loci.kind === 'element-loci') {
+            if (!loci.elements || loci.elements.length === 0) {
+                hoverInfo.classList.remove('visible');
+                return;
+            }
+
+            const element = loci.elements[0];
+            const unit = element.unit;
+            const structure = loci.structure;
+
+            if (!unit || !structure) {
+                hoverInfo.classList.remove('visible');
+                return;
+            }
+
+            // Get the first element index using OrderedSet
+            const indices = element.indices;
+            const elementIndex = OrderedSet.getAt(indices, 0);
+            if (elementIndex === undefined) {
+                hoverInfo.classList.remove('visible');
+                return;
+            }
+
+            // Get atom index in the model
+            const atomIndex = unit.elements[elementIndex];
+            const atomInfo = getAtomInfo(unit, atomIndex);
+
+            // Update display
+            hoverInfo.innerHTML = `<span class="chain-label">Chain ${atomInfo.chainId}</span> · <span class="residue-name">${atomInfo.resName}</span> <span class="residue-num">${atomInfo.resNum}</span>`;
+            hoverInfo.classList.add('visible');
+            return;
+        }
+
+        // Unknown loci type
+        hoverInfo.classList.remove('visible');
+
+    } catch (error) {
+        // Silently fail - just hide the info
+        console.log('Hover info error:', error);
+        hoverInfo.classList.remove('visible');
+    }
+}
+
 async function deselectAll() {
     console.log('deselectAll called');
     selectedResidues.clear();
@@ -721,15 +948,12 @@ function buildSelectionQuery(residueSet) {
 }
 
 // Core function: Rebuild all polymer representations with current colors
+// COLOR and ATOMS are INDEPENDENT:
+// - residueColorMap: tracks color (cartoon/surface color only)
+// - atomsVisibleResidues: tracks which residues show ball-and-stick
+// - cartoonVisibleResidues/surfaceVisibleResidues: partial mode for cartoon/surface
 async function rebuildAllRepresentations(structureRef) {
     const reprBuilder = plugin.builders.structure.representation;
-
-    // Group residues by color
-    const colorGroups = new Map(); // color -> Set of residue keys
-    residueColorMap.forEach((color, key) => {
-        if (!colorGroups.has(color)) colorGroups.set(color, new Set());
-        colorGroups.get(color).add(key);
-    });
 
     // Get all residue keys
     const allResidueKeys = new Set();
@@ -737,73 +961,144 @@ async function rebuildAllRepresentations(structureRef) {
         allResidueKeys.add(`${res.chain}:${res.resno}`);
     });
 
-    // Find uncolored residues
-    const uncoloredResidues = new Set();
-    allResidueKeys.forEach(key => {
-        if (!residueColorMap.has(key)) {
-            uncoloredResidues.add(key);
+    // Determine which residues should have cartoon
+    let cartoonResidues = new Set();
+    if (representationState.cartoon) {
+        if (cartoonPartialMode && cartoonVisibleResidues.size > 0) {
+            cartoonResidues = new Set(cartoonVisibleResidues);
+        } else if (!cartoonPartialMode) {
+            cartoonResidues = new Set(allResidueKeys);
         }
-    });
-
-    // Determine which repr types to create
-    const activeTypes = [];
-    if (representationState.cartoon) activeTypes.push('cartoon');
-    if (representationState.atoms) activeTypes.push('ball-and-stick');
-    if (representationState.surface) activeTypes.push('molecular-surface');
-
-    // Default to cartoon if nothing active
-    if (activeTypes.length === 0) {
-        activeTypes.push('cartoon');
-        representationState.cartoon = true;
     }
 
-    console.log(`rebuildAllRepresentations: ${colorGroups.size} color groups, ${uncoloredResidues.size} uncolored, types: ${activeTypes.join(',')}`);
+    // Determine which residues should have surface
+    let surfaceResidues = new Set();
+    if (representationState.surface) {
+        if (surfacePartialMode && surfaceVisibleResidues.size > 0) {
+            surfaceResidues = new Set(surfaceVisibleResidues);
+        } else if (!surfacePartialMode) {
+            surfaceResidues = new Set(allResidueKeys);
+        }
+    }
 
-    // Create representations for each color group
-    for (const [color, residueSet] of colorGroups) {
-        const colorValue = parseInt(color.replace('#', ''), 16);
-        const query = buildSelectionQuery(residueSet);
+    console.log(`rebuildAllRepresentations: cartoon=${cartoonResidues.size}, surface=${surfaceResidues.size}, atoms=${atomsVisibleResidues.size}`);
 
-        try {
-            const comp = await plugin.builders.structure.tryCreateComponentFromExpression(
-                structureRef.cell,
-                query,
-                `color-${color.replace('#', '')}-${Date.now()}`,
-                { label: `Color ${color}` }
-            );
+    // Helper: create representations for a set of residues with a specific repr type
+    const createReprForResidues = async (residueSet, reprType) => {
+        if (residueSet.size === 0) return;
 
-            console.log(`Component for ${color}: ${comp ? 'created' : 'failed'}`);
+        // Group by color
+        const colorGroups = new Map();
+        const uncolored = new Set();
 
-            if (comp) {
-                for (const reprType of activeTypes) {
+        residueSet.forEach(key => {
+            if (residueColorMap.has(key)) {
+                const color = residueColorMap.get(key);
+                if (!colorGroups.has(color)) colorGroups.set(color, new Set());
+                colorGroups.get(color).add(key);
+            } else {
+                uncolored.add(key);
+            }
+        });
+
+        // Create for each color group
+        for (const [color, keys] of colorGroups) {
+            const colorValue = parseInt(color.replace('#', ''), 16);
+            const query = buildSelectionQuery(keys);
+            try {
+                const comp = await plugin.builders.structure.tryCreateComponentFromExpression(
+                    structureRef.cell, query,
+                    `${reprType}-${color.replace('#', '')}-${Date.now()}`,
+                    { label: `${reprType} ${color}` }
+                );
+                if (comp) {
                     await addRepresentationWithColor(reprBuilder, comp, reprType, colorValue);
                 }
+            } catch (e) {
+                console.error(`Failed to create ${reprType} for ${color}:`, e);
             }
-        } catch (e) {
-            console.error(`Failed to create component for ${color}:`, e);
         }
-    }
 
-    // Create representations for uncolored residues
-    if (uncoloredResidues.size > 0) {
-        const query = buildSelectionQuery(uncoloredResidues);
-        const comp = await plugin.builders.structure.tryCreateComponentFromExpression(
-            structureRef.cell,
-            query,
-            `uncolored-${Date.now()}`,
-            { label: 'Uncolored' }
-        );
+        // Create for uncolored
+        if (uncolored.size > 0) {
+            const query = buildSelectionQuery(uncolored);
+            try {
+                const comp = await plugin.builders.structure.tryCreateComponentFromExpression(
+                    structureRef.cell, query,
+                    `${reprType}-uncolored-${Date.now()}`,
+                    { label: `${reprType} uncolored` }
+                );
+                if (comp) {
+                    if (currentUniformColor) {
+                        const colorValue = parseInt(currentUniformColor.replace('#', ''), 16);
+                        await addRepresentationWithColor(reprBuilder, comp, reprType, colorValue);
+                    } else {
+                        await addRepresentationWithScheme(reprBuilder, comp, reprType, currentColorScheme || 'chain-id');
+                    }
+                }
+            } catch (e) {
+                console.error(`Failed to create ${reprType} uncolored:`, e);
+            }
+        }
+    };
 
-        if (comp) {
-            for (const reprType of activeTypes) {
+    // 1. Create cartoon representations
+    await createReprForResidues(cartoonResidues, 'cartoon');
+
+    // 2. Create surface representations
+    await createReprForResidues(surfaceResidues, 'molecular-surface');
+
+    // 3. Create ball-and-stick for atomsVisibleResidues
+    if (atomsVisibleResidues.size > 0) {
+        const atomsByColor = new Map();
+        const atomsUncolored = new Set();
+
+        atomsVisibleResidues.forEach(key => {
+            if (residueColorMap.has(key)) {
+                const color = residueColorMap.get(key);
+                if (!atomsByColor.has(color)) atomsByColor.set(color, new Set());
+                atomsByColor.get(color).add(key);
+            } else {
+                atomsUncolored.add(key);
+            }
+        });
+
+        for (const [color, residueSet] of atomsByColor) {
+            const colorValue = parseInt(color.replace('#', ''), 16);
+            const query = buildSelectionQuery(residueSet);
+            try {
+                const comp = await plugin.builders.structure.tryCreateComponentFromExpression(
+                    structureRef.cell, query,
+                    `atoms-${color.replace('#', '')}-${Date.now()}`,
+                    { label: `Atoms ${color}` }
+                );
+                if (comp) {
+                    await addRepresentationWithColor(reprBuilder, comp, 'ball-and-stick', colorValue);
+                }
+            } catch (e) {
+                console.error(`Failed to create atoms for ${color}:`, e);
+            }
+        }
+
+        if (atomsUncolored.size > 0) {
+            const query = buildSelectionQuery(atomsUncolored);
+            const comp = await plugin.builders.structure.tryCreateComponentFromExpression(
+                structureRef.cell, query,
+                `atoms-uncolored-${Date.now()}`,
+                { label: 'Atoms (uncolored)' }
+            );
+            if (comp) {
                 if (currentUniformColor) {
                     const colorValue = parseInt(currentUniformColor.replace('#', ''), 16);
-                    await addRepresentationWithColor(reprBuilder, comp, reprType, colorValue);
+                    await addRepresentationWithColor(reprBuilder, comp, 'ball-and-stick', colorValue);
                 } else {
-                    await addRepresentationWithScheme(reprBuilder, comp, reprType, currentColorScheme || 'chain-id');
+                    await addRepresentationWithScheme(reprBuilder, comp, 'ball-and-stick', currentColorScheme || 'chain-id');
                 }
             }
         }
+
+        // 4. Auto-apply element colors
+        await applyElementColorToAtoms(structureRef);
     }
 }
 
@@ -890,10 +1185,17 @@ async function deleteAllPolymerRepresentations(structureRef) {
                        label.includes('surface') ||
                        label.includes('gaussian');
 
-        // Check if it's a custom color component
+        // Check if it's a custom color component, element color component, or atoms component
         const isColorComp = label.includes('color #') ||
+                           label.includes('color ') ||
                            label.includes('uncolored') ||
-                           tags.some(t => t.includes('color-') || t.includes('uncolored'));
+                           label.includes('o atoms') ||
+                           label.includes('n atoms') ||
+                           label.includes('s atoms') ||
+                           label.includes('atoms ') ||
+                           label.includes('atoms (') ||
+                           label.includes('selected') ||
+                           tags.some(t => t.includes('color-') || t.includes('uncolored') || t.includes('element-') || t.includes('atoms-'));
 
         if (isRepr || isColorComp) {
             // Make sure it's related to polymer (not ligand/water/ion)
@@ -1118,6 +1420,65 @@ function shuffleArray(array) {
     return shuffled;
 }
 
+// Apply element coloring (O=red, N=blue, S=yellow) to residues with visible atoms
+// This is called automatically after rebuildAllRepresentations
+async function applyElementColorToAtoms(structureRef) {
+    if (!plugin || atomsVisibleResidues.size === 0) return;
+
+    const reprBuilder = plugin.builders.structure.representation;
+
+    // Heteroatom colors (CPK-like)
+    const heteroatomColors = [
+        { element: 'O', color: 0xFF4444 },  // Red - Oxygen
+        { element: 'N', color: 0x4444FF },  // Blue - Nitrogen
+        { element: 'S', color: 0xFFCC00 },  // Yellow - Sulfur
+    ];
+
+    // Build residue filter from atomsVisibleResidues
+    const residueTests = [];
+    atomsVisibleResidues.forEach(key => {
+        const [chain, resno] = key.split(':');
+        residueTests.push(
+            MS.core.logic.and([
+                MS.core.rel.eq([MS.ammp('auth_asym_id'), chain]),
+                MS.core.rel.eq([MS.ammp('auth_seq_id'), parseInt(resno)])
+            ])
+        );
+    });
+
+    for (const { element, color } of heteroatomColors) {
+        // Combine: element match AND (residue in atomsVisibleResidues)
+        const elementQuery = MS.struct.generator.atomGroups({
+            'atom-test': MS.core.logic.and([
+                MS.core.rel.eq([MS.acp('elementSymbol'), MS.es(element)]),
+                MS.core.logic.or(residueTests)
+            ])
+        });
+
+        try {
+            const comp = await plugin.builders.structure.tryCreateComponentFromExpression(
+                structureRef.cell,
+                elementQuery,
+                `element-${element}-${Date.now()}`,
+                { label: `${element} atoms` }
+            );
+
+            if (comp) {
+                await reprBuilder.addRepresentation(comp, {
+                    type: 'ball-and-stick',
+                    color: 'uniform',
+                    colorParams: { value: color },
+                    typeParams: { sizeFactor: 0.15, sizeAspectRatio: 0.88 }
+                });
+            }
+        } catch (e) {
+            // Silently ignore - element may not exist in selection
+        }
+    }
+
+    console.log(`Element colors applied to ${atomsVisibleResidues.size} residues`);
+}
+
 // Apply chain-based coloring with custom palette
 async function applyChainColor() {
     if (!plugin || !currentStructure) return;
@@ -1331,66 +1692,49 @@ async function showRepresentation(type) {
             ? currentStructureIndex : 0;
         const structureRef = structures[structIndex];
 
-        // Update state first
-        representationState[type] = true;
-        console.log(`Show ${type}`);
+        console.log(`Show ${type}, selection: ${selectedResidues.size}`);
 
-        // If we have colored residues, rebuild all with colors
-        if (residueColorMap.size > 0) {
-            await deleteAllPolymerRepresentations(structureRef);
-            await rebuildAllRepresentations(structureRef);
-        } else {
-            // No colors - simple add to polymer component
-            const reprBuilder = plugin.builders.structure.representation;
-
-            let polymerComp = null;
-            const components = structureRef.components || [];
-            for (const comp of components) {
-                if (comp.key === 'polymer' || comp.key === 'structure-component-static-polymer') {
-                    polymerComp = comp.cell;
-                    break;
-                }
+        if (type === 'atoms') {
+            // ATOMS: Add selected residues (or all if none) to atomsVisibleResidues
+            representationState.atoms = true;
+            if (selectedResidues.size > 0) {
+                selectedResidues.forEach(key => atomsVisibleResidues.add(key));
+                console.log(`Added ${selectedResidues.size} to atomsVisibleResidues, total: ${atomsVisibleResidues.size}`);
+            } else {
+                sequenceData.forEach(res => atomsVisibleResidues.add(`${res.chain}:${res.resno}`));
+                console.log(`Added all ${atomsVisibleResidues.size} to atomsVisibleResidues`);
             }
-
-            if (!polymerComp) {
-                polymerComp = await plugin.builders.structure.tryCreateComponentStatic(structureRef.cell, 'polymer');
+        } else if (type === 'cartoon') {
+            // CARTOON: Add selected residues (or switch to full mode if none)
+            representationState.cartoon = true;
+            if (selectedResidues.size > 0) {
+                cartoonPartialMode = true;
+                selectedResidues.forEach(key => cartoonVisibleResidues.add(key));
+                console.log(`Added ${selectedResidues.size} to cartoonVisibleResidues, total: ${cartoonVisibleResidues.size}`);
+            } else {
+                // No selection - full mode (show all)
+                cartoonPartialMode = false;
+                cartoonVisibleResidues.clear();
+                console.log('Cartoon: full mode (all residues)');
             }
-
-            if (polymerComp) {
-                const colorScheme = currentUniformColor ? 'uniform' : (currentColorScheme || 'chain-id');
-                const colorParams = currentUniformColor ? { value: parseInt(currentUniformColor.replace('#', ''), 16) } : undefined;
-
-                if (type === 'atoms') {
-                    await reprBuilder.addRepresentation(polymerComp, {
-                        type: 'ball-and-stick',
-                        color: colorScheme,
-                        colorParams
-                    });
-                } else if (type === 'cartoon') {
-                    await reprBuilder.addRepresentation(polymerComp, {
-                        type: 'cartoon',
-                        color: colorScheme,
-                        colorParams
-                    });
-                } else if (type === 'surface') {
-                    try {
-                        await reprBuilder.addRepresentation(polymerComp, {
-                            type: 'molecular-surface',
-                            color: colorScheme,
-                            colorParams,
-                            typeParams: { quality: 'auto', probeRadius: 1.4, resolution: 2 }
-                        });
-                    } catch (surfaceError) {
-                        await reprBuilder.addRepresentation(polymerComp, {
-                            type: 'gaussian-surface',
-                            color: colorScheme,
-                            colorParams,
-                            typeParams: { radiusOffset: 1, smoothness: 1.5 }
-                        });
-                    }
-                }
+        } else if (type === 'surface') {
+            // SURFACE: Add selected residues (or switch to full mode if none)
+            representationState.surface = true;
+            if (selectedResidues.size > 0) {
+                surfacePartialMode = true;
+                selectedResidues.forEach(key => surfaceVisibleResidues.add(key));
+                console.log(`Added ${selectedResidues.size} to surfaceVisibleResidues, total: ${surfaceVisibleResidues.size}`);
+            } else {
+                // No selection - full mode (show all)
+                surfacePartialMode = false;
+                surfaceVisibleResidues.clear();
+                console.log('Surface: full mode (all residues)');
             }
         }
+
+        // Always rebuild
+        await deleteAllPolymerRepresentations(structureRef);
+        await rebuildAllRepresentations(structureRef);
 
     } catch (error) {
         console.error(`Error showing ${type}:`, error);
@@ -1415,81 +1759,67 @@ async function hideRepresentation(type) {
 
         const structIndex = (currentStructureIndex >= 0 && currentStructureIndex < structures.length)
             ? currentStructureIndex : 0;
-        const struct = structures[structIndex];
+        const structureRef = structures[structIndex];
 
-        // Map type to Mol* representation names
-        const typeMap = {
-            'atoms': ['ball-and-stick', 'ball+stick', 'ballandstick'],
-            'cartoon': ['cartoon', 'ribbon'],
-            'surface': ['molecular-surface', 'gaussian-surface', 'molecularsurface', 'gaussiansurface']
-        };
-        const targetTypes = typeMap[type] || [];
+        console.log(`Hide ${type}, selection: ${selectedResidues.size}`);
 
-        let removed = false;
+        if (type === 'atoms') {
+            // ATOMS: Remove selected residues (or all if none)
+            if (selectedResidues.size > 0) {
+                selectedResidues.forEach(key => atomsVisibleResidues.delete(key));
+                console.log(`Removed ${selectedResidues.size} from atomsVisibleResidues, remaining: ${atomsVisibleResidues.size}`);
+            } else {
+                atomsVisibleResidues.clear();
+                console.log('Cleared all atomsVisibleResidues');
+            }
+            representationState.atoms = atomsVisibleResidues.size > 0;
 
-        // Iterate through hierarchy components and check representation type
-        const components = struct.components || [];
-        for (const comp of components) {
-            if (!comp.representations) continue;
-
-            for (const repr of comp.representations) {
-                if (!repr.cell) continue;
-
-                // Get representation type from multiple sources
-                let reprTypeName = null;
-
-                // Method 1: From cell.obj.repr.label (most reliable)
-                if (repr.cell.obj?.repr?.label) {
-                    reprTypeName = repr.cell.obj.repr.label;
+        } else if (type === 'cartoon') {
+            // CARTOON: Remove selected residues (or turn off completely if none)
+            if (selectedResidues.size > 0 && cartoonPartialMode) {
+                selectedResidues.forEach(key => cartoonVisibleResidues.delete(key));
+                console.log(`Removed ${selectedResidues.size} from cartoonVisibleResidues, remaining: ${cartoonVisibleResidues.size}`);
+                // If no residues left, turn off cartoon
+                if (cartoonVisibleResidues.size === 0) {
+                    representationState.cartoon = false;
+                    cartoonPartialMode = false;
                 }
+            } else {
+                // No selection or full mode - turn off completely
+                representationState.cartoon = false;
+                cartoonPartialMode = false;
+                cartoonVisibleResidues.clear();
+                console.log('Cartoon: turned off completely');
+            }
 
-                // Method 2: From transform params
-                if (!reprTypeName && repr.cell.transform?.params?.type?.name) {
-                    reprTypeName = repr.cell.transform.params.type.name;
+        } else if (type === 'surface') {
+            // SURFACE: Remove selected residues (or turn off completely if none)
+            if (selectedResidues.size > 0 && surfacePartialMode) {
+                selectedResidues.forEach(key => surfaceVisibleResidues.delete(key));
+                console.log(`Removed ${selectedResidues.size} from surfaceVisibleResidues, remaining: ${surfaceVisibleResidues.size}`);
+                // If no residues left, turn off surface
+                if (surfaceVisibleResidues.size === 0) {
+                    representationState.surface = false;
+                    surfacePartialMode = false;
                 }
-
-                // Method 3: From state params
-                if (!reprTypeName && repr.cell.obj?.params?.values?.type?.name) {
-                    reprTypeName = repr.cell.obj.params.values.type.name;
-                }
-
-                console.log(`Component ${comp.key} repr: ${reprTypeName}`);
-
-                // Check if this representation matches our target type
-                if (reprTypeName) {
-                    const normalizedType = reprTypeName.toLowerCase().replace(/[\s-]/g, '');
-                    const shouldRemove = targetTypes.some(t => {
-                        const normalizedTarget = t.toLowerCase().replace(/[\s-]/g, '');
-                        return normalizedType === normalizedTarget ||
-                               normalizedType.includes(normalizedTarget);
-                    });
-
-                    if (shouldRemove) {
-                        try {
-                            const update = plugin.build();
-                            update.delete(repr.cell);
-                            await update.commit();
-                            removed = true;
-                            console.log(`Removed representation: ${reprTypeName}`);
-                        } catch (e) {
-                            console.error('Error deleting repr:', e);
-                        }
-                    }
-                }
+            } else {
+                // No selection or full mode - turn off completely
+                representationState.surface = false;
+                surfacePartialMode = false;
+                surfaceVisibleResidues.clear();
+                console.log('Surface: turned off completely');
             }
         }
 
-        if (removed) {
-            representationState[type] = false;
-            representationComponents[type] = null;
-        }
+        // Rebuild to reflect the change
+        await deleteAllPolymerRepresentations(structureRef);
+        await rebuildAllRepresentations(structureRef);
 
-        console.log(`Hide ${type}: ${removed ? 'success' : 'no matching repr found'}`);
+        console.log(`Hide ${type}: done`);
 
     } catch (error) {
         console.error(`Error hiding ${type}:`, error);
     } finally {
-        // ALWAYS restore camera at the end
         if (cameraSnapshot && plugin.canvas3d) {
             plugin.canvas3d.camera.setState(cameraSnapshot, 0);
             plugin.canvas3d.requestDraw(true);
@@ -1667,7 +1997,7 @@ function updateSelButtonState() {
 function addToStructuresList(id, name, structIndex) {
     if (loadedStructures.find(s => s.id === id)) return;
 
-    loadedStructures.push({ id, name, structIndex });
+    loadedStructures.push({ id, name, structIndex, visible: true });
     currentStructureIndex = structIndex;
     updateStructuresListUI();
 }
@@ -1680,8 +2010,11 @@ function updateStructuresListUI() {
             floatingContainer.innerHTML = '';
         } else {
             floatingContainer.innerHTML = loadedStructures.map(struct => `
-                <div class="structure-tag ${struct.id === currentStructure ? 'active' : ''}" onclick="focusOnStructure('${struct.id}')">
+                <div class="structure-tag ${struct.id === currentStructure ? 'active' : ''} ${struct.visible ? '' : 'hidden-structure'}" onclick="focusOnStructure('${struct.id}')">
                     <span>${struct.name}</span>
+                    <button class="tag-visibility ${struct.visible ? 'visible' : 'hidden'}" onclick="event.stopPropagation(); toggleStructureVisibility('${struct.id}')" title="${struct.visible ? 'Hide' : 'Show'}">
+                        <i class="fas ${struct.visible ? 'fa-eye' : 'fa-eye-slash'}"></i>
+                    </button>
                     <button class="tag-download" onclick="event.stopPropagation(); downloadStructure('${struct.id}')" title="Download">
                         <i class="fas fa-download"></i>
                     </button>
@@ -1691,6 +2024,65 @@ function updateStructuresListUI() {
                 </div>
             `).join('');
         }
+    }
+}
+
+async function toggleStructureVisibility(structureId) {
+    if (!plugin) return;
+
+    const structInfo = loadedStructures.find(s => s.id === structureId);
+    if (!structInfo) return;
+
+    const structures = plugin.managers.structure.hierarchy.current.structures;
+
+    // Find the structure
+    let structIndex = -1;
+    for (let i = 0; i < structures.length; i++) {
+        const s = structures[i];
+        const label = s.cell.obj?.label || '';
+        if (label.includes(structureId) || structureId.includes(label) ||
+            label.toLowerCase().includes(structureId.toLowerCase())) {
+            structIndex = i;
+            break;
+        }
+    }
+
+    if (structIndex === -1) {
+        structIndex = Math.min(structInfo.structIndex, structures.length - 1);
+    }
+
+    if (structIndex >= 0 && structIndex < structures.length) {
+        const struct = structures[structIndex];
+
+        // Toggle visibility for all components and representations
+        const newVisible = !structInfo.visible;
+        structInfo.visible = newVisible;
+
+        try {
+            // Toggle visibility of the structure's components
+            const components = struct.components || [];
+            for (const comp of components) {
+                if (!comp.cell) continue;
+
+                // Update component visibility
+                plugin.state.data.updateCellState(comp.cell.transform.ref, { isHidden: !newVisible });
+
+                // Also update all representations
+                if (comp.representations) {
+                    for (const repr of comp.representations) {
+                        if (repr.cell) {
+                            plugin.state.data.updateCellState(repr.cell.transform.ref, { isHidden: !newVisible });
+                        }
+                    }
+                }
+            }
+
+            console.log(`Structure ${structureId} visibility: ${newVisible}`);
+        } catch (e) {
+            console.error('Toggle visibility error:', e);
+        }
+
+        updateStructuresListUI();
     }
 }
 
@@ -1728,8 +2120,20 @@ function focusOnStructure(structureId) {
         selectedResidues.clear();
         updateSelectionInfo();
 
+        // Clear selection-related state but PRESERVE color state
+        atomsVisibleResidues.clear();
+        cartoonVisibleResidues.clear();
+        surfaceVisibleResidues.clear();
+        cartoonPartialMode = false;
+        surfacePartialMode = false;
+        // Keep residueColorMap, currentUniformColor, currentColorScheme - don't reset colors!
+        representationState = { atoms: false, cartoon: true, surface: false };
+
         // Clear highlight when switching structures
         plugin.managers.interactivity.lociHighlights.clearHighlights();
+
+        // Rebuild representations with current color state preserved
+        rebuildAllRepresentations(struct);
     }
 }
 
@@ -1874,7 +2278,13 @@ async function clearAllStructures() {
         currentStructure = null;
         currentStructureIndex = -1;
         residueColorMap.clear();
+        atomsVisibleResidues.clear();
+        cartoonVisibleResidues.clear();
+        surfaceVisibleResidues.clear();
+        cartoonPartialMode = false;
+        surfacePartialMode = false;
         currentUniformColor = null;
+        currentColorScheme = 'chain-id';
         representationState = { atoms: false, cartoon: true, surface: false };
         representationComponents = { atoms: null, cartoon: null, surface: null };
 
@@ -1920,6 +2330,7 @@ window.applySecondaryStructureColoring = applySecondaryStructureColoring;
 window.showRepresentation = showRepresentation;
 window.hideRepresentation = hideRepresentation;
 window.applyChainColor = applyChainColor;
+window.toggleStructureVisibility = toggleStructureVisibility;
 window.downloadStructure = downloadStructure;
 
 // Download structure as PDB file

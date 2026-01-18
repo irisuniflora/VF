@@ -182,6 +182,42 @@
             display: block;
         }
 
+        /* Hover Info - Top left below controls */
+        .hover-info {
+            position: absolute;
+            top: 66px;
+            left: 28px;
+            background: rgba(0, 0, 0, 0.75);
+            color: white;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            z-index: 150;
+            display: none;
+            white-space: nowrap;
+            backdrop-filter: blur(4px);
+        }
+
+        .hover-info.visible {
+            display: block;
+        }
+
+        .hover-info .chain-label {
+            color: #66CCEE;
+            font-weight: 600;
+        }
+
+        .hover-info .residue-name {
+            color: #CCBB44;
+            font-weight: 600;
+        }
+
+        .hover-info .residue-num {
+            color: #fff;
+            font-weight: 600;
+        }
+
         /* Top Left Controls - All in one row */
         .top-left-controls {
             position: absolute;
@@ -240,6 +276,7 @@
             box-shadow: 0 0 0 2px var(--accent-primary), 0 2px 8px rgba(0, 0, 0, 0.2);
         }
 
+        .structure-tag .tag-visibility,
         .structure-tag .tag-download,
         .structure-tag .tag-delete {
             width: 18px;
@@ -256,6 +293,21 @@
             transition: all 0.15s;
         }
 
+        .structure-tag .tag-visibility.visible {
+            background: #e8f5e9;
+            color: #4caf50;
+        }
+
+        .structure-tag .tag-visibility.hidden {
+            background: #f0f0f0;
+            color: #999;
+        }
+
+        .structure-tag .tag-visibility:hover {
+            background: #4caf50;
+            color: white;
+        }
+
         .structure-tag .tag-download:hover {
             background: var(--accent-primary);
             color: white;
@@ -264,6 +316,14 @@
         .structure-tag .tag-delete:hover {
             background: rgba(0, 0, 0, 0.2);
             color: #333;
+        }
+
+        .structure-tag.hidden-structure {
+            opacity: 0.5;
+        }
+
+        .structure-tag.hidden-structure span {
+            text-decoration: line-through;
         }
 
         /* Color Palette - Horizontal */
@@ -331,6 +391,29 @@
         }
 
         .palette-chain-btn:hover {
+            transform: scale(1.15);
+            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25);
+        }
+
+        .palette-element-btn {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid rgba(255, 255, 255, 0.8);
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+            transition: all 0.15s ease;
+            background: linear-gradient(135deg, #FF4444 0%, #4444FF 50%, #FFCC00 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: 700;
+            color: white;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        }
+
+        .palette-element-btn:hover {
             transform: scale(1.15);
             box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25);
         }
@@ -594,6 +677,11 @@
             font-weight: 500;
         }
 
+        /* Add gap after every 10th residue */
+        .sequence-residue.decade-end {
+            margin-right: 8px;
+        }
+
         /* Legend */
         .sequence-legend {
             display: flex;
@@ -855,7 +943,6 @@
                     <div class="palette-color" style="background: #5C8EBF;" onclick="applyPaletteColor('#5C8EBF')"></div>
                     <div class="palette-color" style="background: #6AAF6A;" onclick="applyPaletteColor('#6AAF6A')"></div>
                     <div class="palette-color" style="background: #D46A6A;" onclick="applyPaletteColor('#D46A6A')"></div>
-                    <div class="palette-color" style="background: #E8A838;" onclick="applyPaletteColor('#E8A838')"></div>
                     <div class="palette-color" style="background: #9B7BB8;" onclick="applyPaletteColor('#9B7BB8')"></div>
                     <div class="palette-color" style="background: #888888;" onclick="applyPaletteColor('#888888')"></div>
                     <div class="palette-color" style="background: #D4A76A;" onclick="applyPaletteColor('#D4A76A')"></div>
@@ -874,6 +961,9 @@
                     <!-- Structure tags will be populated here -->
                 </div>
             </div>
+
+            <!-- Hover Info Display -->
+            <div class="hover-info" id="hoverInfo"></div>
 
             <!-- Selection Info Badge -->
             <div class="selection-info-badge" id="selectionBadge"></div>
