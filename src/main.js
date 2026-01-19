@@ -16,7 +16,112 @@ import { MolScriptBuilder as MS } from 'molstar/lib/mol-script/language/builder'
 // Import Color utility
 import { Color } from 'molstar/lib/mol-util/color';
 
-// State variables
+// ============================================
+// Constants
+// ============================================
+
+// UI Colors
+const COLORS = {
+    SELECT: 0x00FF00,           // Green - selection highlight
+    HIGHLIGHT: 0xFFFF00,        // Yellow - hover highlight
+    OXYGEN: 0xFF4444,           // Red - oxygen atoms
+    NITROGEN: 0x4444FF,         // Blue - nitrogen atoms
+    SULFUR: 0xFFCC00            // Yellow - sulfur atoms
+};
+
+// Molecular interaction distances (Ångströms)
+const INTERACTION_DISTANCES = {
+    HYDROGEN_BOND: 4.0,
+    IONIC_BOND: 3.5,
+    HYDROPHOBIC: 4.5,
+    PI_STACKING: 5.5
+};
+
+// Timing constants (milliseconds)
+const TIMING = {
+    POLL_INTERVAL: 50,          // Structure loading poll interval
+    TOAST_ANIMATION: 300,       // Toast fade out animation
+    TOAST_DURATION: 4000,       // Toast display duration
+    NETWORK_TIMEOUT: 30000,     // Network request timeout
+    STRUCTURE_LOAD_TIMEOUT: 5000, // Max wait for structure ready
+    CAMERA_RESTORE_DELAY: 100   // Delay before restoring camera (needs time for render)
+};
+
+// Rendering parameters
+const RENDER_PARAMS = {
+    EDGE_STRENGTH: 1.5,         // Selection/highlight edge strength
+    ATOM_SIZE_FACTOR: 0.15,     // Ball-and-stick atom size
+    ATOM_ASPECT_RATIO: 0.88,    // Atom aspect ratio
+    PROBE_RADIUS: 1.4,          // Molecular surface probe radius
+    SURFACE_RESOLUTION: 2,      // Surface calculation resolution
+    SURFACE_SMOOTHNESS: 1.5,    // Gaussian surface smoothness
+    UNIFORM_SIZE: 0.4,          // Uniform representation size
+    OUTLINE_SCALE: 1.0,         // Outline effect scale
+    OUTLINE_THRESHOLD: 0.33     // Outline threshold
+};
+
+// File constraints
+const FILE_CONSTRAINTS = {
+    ALLOWED_EXTENSIONS: ['.pdb', '.cif', '.mcif', '.mol2'],
+    MAX_FILE_SIZE: 50 * 1024 * 1024  // 50MB
+};
+
+// ============================================
+// Centralized State Management
+// ============================================
+const AppState = {
+    // Core viewer references
+    viewer: null,
+    plugin: null,
+
+    // Current structure info
+    currentStructure: null,
+    loadedStructures: [],
+    currentStructureIndex: -1,
+
+    // UI state
+    isSpinning: false,
+    outlineEnabled: true,
+    currentStyle: 'cartoon',
+    currentColorScheme: 'chain-id',
+    currentUniformColor: null,
+
+    // Selection groups
+    selectionGroups: [],
+
+    // Representation visibility
+    representationState: {
+        atoms: false,
+        cartoon: true,
+        surface: false
+    },
+    representationComponents: {
+        atoms: null,
+        cartoon: null,
+        surface: null
+    },
+
+    // Sequence and selection
+    sequenceData: [],
+    selectedResidues: new Set(),
+    currentChainFilter: '',
+    isSelecting: false,
+    selectionStart: null,
+
+    // Residue visibility per representation
+    atomsVisibleResidues: new Set(),
+    cartoonVisibleResidues: new Set(),
+    surfaceVisibleResidues: new Set(),
+
+    // Partial mode flags
+    cartoonPartialMode: false,
+    surfacePartialMode: false,
+
+    // Event subscriptions for cleanup
+    subscriptions: []
+};
+
+// Backwards compatibility - expose as individual variables
 let viewer = null;
 let plugin = null;
 let currentStructure = null;
@@ -25,41 +130,110 @@ let outlineEnabled = true;
 let currentStyle = 'cartoon';
 let currentColorScheme = 'chain-id';
 let currentUniformColor = null;
-
-// Loaded structures list
 let loadedStructures = [];
 let currentStructureIndex = -1;
-
-// Selection groups state
 let selectionGroups = [];
-
-// Representation visibility state
-let representationState = {
-    atoms: false,      // ball-and-stick for polymer
-    cartoon: true,     // cartoon representation
-    surface: false     // molecular surface
-};
-let representationComponents = {
-    atoms: null,
-    cartoon: null,
-    surface: null
-};
-
-// Sequence and selection state
+let representationState = AppState.representationState;
+let representationComponents = AppState.representationComponents;
 let sequenceData = [];
 let selectedResidues = new Set();
 let currentChainFilter = '';
 let isSelecting = false;
 let selectionStart = null;
-
-// Track which residues have each representation visible (separate from color)
 let atomsVisibleResidues = new Set();
-let cartoonVisibleResidues = new Set();  // empty = show all, has items = show only those
-let surfaceVisibleResidues = new Set();  // empty = show all, has items = show only those
-
-// Track if we're in "partial" mode (only selected residues have repr) vs "full" mode (all residues)
+let cartoonVisibleResidues = new Set();
+let surfaceVisibleResidues = new Set();
 let cartoonPartialMode = false;
 let surfacePartialMode = false;
+
+// ============================================
+// DOM Element Cache
+// ============================================
+const DOMCache = {
+    elements: {},
+
+    get(id) {
+        if (!this.elements[id]) {
+            this.elements[id] = document.getElementById(id);
+        }
+        return this.elements[id];
+    },
+
+    clear() {
+        this.elements = {};
+    }
+};
+
+// Helper function to get cached DOM elements
+function $(id) {
+    return DOMCache.get(id);
+}
+
+// Timeout wrapper for async operations
+function withTimeout(promise, ms, errorMessage = 'Operation timed out') {
+    const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(errorMessage)), ms)
+    );
+    return Promise.race([promise, timeout]);
+}
+
+// Wait for structure to be fully loaded and ready
+async function waitForStructureReady(structureIndex, maxWait = TIMING.STRUCTURE_LOAD_TIMEOUT) {
+    const startTime = Date.now();
+    while (Date.now() - startTime < maxWait) {
+        const structures = plugin.managers.structure.hierarchy.current.structures;
+        if (structures[structureIndex]?.cell?.obj?.data) {
+            return true;
+        }
+        await new Promise(resolve => setTimeout(resolve, TIMING.POLL_INTERVAL));
+    }
+    return false;
+}
+
+// Restore camera state after operations (prevents auto-zoom)
+// Uses multiple attempts to ensure camera is restored even after Mol* auto-focus
+function restoreCamera(cameraSnapshot) {
+    if (!cameraSnapshot || !plugin?.canvas3d) return;
+
+    const restore = () => {
+        if (plugin?.canvas3d) {
+            plugin.canvas3d.camera.setState(cameraSnapshot, 0);
+        }
+    };
+
+    // Restore multiple times to override any auto-focus behavior
+    restore();
+    setTimeout(restore, 50);
+    setTimeout(restore, 150);
+    setTimeout(() => {
+        restore();
+        plugin.canvas3d?.requestDraw(true);
+    }, 300);
+}
+
+// Toast notification system
+function showToast(message, type = 'info', duration = TIMING.TOAST_DURATION) {
+    const container = $('toastContainer');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+
+    const icons = {
+        error: 'fa-circle-exclamation',
+        success: 'fa-circle-check',
+        warning: 'fa-triangle-exclamation',
+        info: 'fa-circle-info'
+    };
+
+    toast.innerHTML = `<i class="fas ${icons[type] || icons.info}"></i><span>${message}</span>`;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.classList.add('hiding');
+        setTimeout(() => toast.remove(), TIMING.TOAST_ANIMATION);
+    }, duration);
+}
 
 // Amino acid mappings
 const AA_MAP = {
@@ -82,7 +256,7 @@ const AA_PROPERTY = {
 
 // Initialize Viewer
 async function initViewer() {
-    const viewerElement = document.getElementById('viewer');
+    const viewerElement = $('viewer');
 
     viewer = await Viewer.create(viewerElement, {
         layoutIsExpanded: false,
@@ -105,15 +279,15 @@ async function initViewer() {
         plugin.canvas3d.setProps({
             renderer: {
                 // Make select/highlight colors transparent (only edge will show)
-                selectColor: Color(0x00FF00),
-                highlightColor: Color(0xFFFF00),
+                selectColor: Color(COLORS.SELECT),
+                highlightColor: Color(COLORS.HIGHLIGHT),
             },
             marking: {
                 enabled: true,
-                highlightEdgeColor: Color(0xFFFF00),
-                selectEdgeColor: Color(0x00FF00),
-                highlightEdgeStrength: 1.5,
-                selectEdgeStrength: 1.5,
+                highlightEdgeColor: Color(COLORS.HIGHLIGHT),
+                selectEdgeColor: Color(COLORS.SELECT),
+                highlightEdgeStrength: RENDER_PARAMS.EDGE_STRENGTH,
+                selectEdgeStrength: RENDER_PARAMS.EDGE_STRENGTH,
                 // Use edge-only marking (no fill color change)
                 ghostEdgeStrength: 0,
             }
@@ -126,33 +300,48 @@ async function initViewer() {
                 highlightStrength: 0,   // No color blend for highlight
             }
         });
+
+        // Disable auto-focus when adding/changing representations
+        plugin.canvas3d.setProps({
+            camera: {
+                manualReset: true
+            }
+        });
     }
 
     // Add click listener for deselecting when clicking empty space
-    plugin.canvas3d.input.click.subscribe(async (e) => {
+    const clickSub = plugin.canvas3d.input.click.subscribe(async (e) => {
         // Check if clicked on empty space (no structure)
         const pickResult = plugin.canvas3d.identify(e.x, e.y);
         // Empty space means no repr or repr is undefined/null
         const clickedEmptySpace = !pickResult || !pickResult.repr || pickResult.repr.ref === '';
         if (clickedEmptySpace) {
-            // Clicked on empty space - deselect all
-            console.log('Empty space clicked - clearing selection');
             await deselectAll();
         }
     });
+    AppState.subscriptions.push(clickSub);
 
     // Add hover listener for residue info display
-    plugin.behaviors.interaction.hover.subscribe((event) => {
+    const hoverSub = plugin.behaviors.interaction.hover.subscribe((event) => {
         updateHoverInfo(event);
     });
+    AppState.subscriptions.push(hoverSub);
+}
 
-    console.log('Mol* Viewer initialized');
-    console.log('Internal plugin access:', !!plugin);
+// Cleanup function for event subscriptions
+function cleanup() {
+    AppState.subscriptions.forEach(sub => {
+        if (sub && typeof sub.unsubscribe === 'function') {
+            sub.unsubscribe();
+        }
+    });
+    AppState.subscriptions = [];
+    DOMCache.clear();
 }
 
 // Show/hide loading
 function showLoading(show) {
-    const overlay = document.getElementById('loadingOverlay');
+    const overlay = $('loadingOverlay');
     if (show) {
         overlay.classList.remove('hidden');
     } else {
@@ -162,16 +351,23 @@ function showLoading(show) {
 
 // Load from PDB
 async function loadFromPDB() {
-    const pdbId = document.getElementById('pdbId').value.trim().toUpperCase();
+    const pdbId = $('pdbId').value.trim().toUpperCase();
     if (!pdbId || pdbId.length !== 4) {
-        alert('Please enter a valid 4-character PDB ID');
+        showToast('Please enter a valid 4-character PDB ID', 'warning');
+        return;
+    }
+
+    // Check for duplicate structure
+    if (loadedStructures.find(s => s.id === pdbId)) {
+        showToast(`Structure ${pdbId} is already loaded`, 'warning');
+        $('pdbId').value = '';
         return;
     }
 
     showLoading(true);
 
     try {
-        await viewer.loadPdb(pdbId);
+        await withTimeout(viewer.loadPdb(pdbId), TIMING.NETWORK_TIMEOUT, `Loading ${pdbId} timed out`);
         currentStructure = pdbId;
 
         const structures = plugin.managers.structure.hierarchy.current.structures;
@@ -179,17 +375,22 @@ async function loadFromPDB() {
 
         addToStructuresList(pdbId, pdbId, newIndex);
 
-        setTimeout(() => {
-            extractSequenceFromIndex(newIndex);
-            applyOutline(outlineEnabled);
-        }, 500);
+        await waitForStructureReady(newIndex);
+        extractSequenceFromIndex(newIndex);
+        applyOutline(outlineEnabled);
 
-        document.getElementById('pdbId').value = '';
-        console.log(`Loaded structure: ${pdbId}`);
+        // Apply initial chain colors (skip camera restore, will reset after)
+        await applyChainColor(true);
+
+        // Reset camera to show the full structure
+        plugin.canvas3d?.requestCameraReset();
+
+        $('pdbId').value = '';
+        showToast(`Loaded: ${pdbId}`, 'success');
 
     } catch (error) {
         console.error('Error loading structure:', error);
-        alert(`Failed to load structure: ${pdbId}`);
+        showToast(`Failed to load structure: ${pdbId}`, 'error');
     } finally {
         showLoading(false);
     }
@@ -200,14 +401,36 @@ async function loadFromFile(event) {
     const file = event.target.files[0];
     if (!file) return;
 
+    // Validate file extension
+    const ext = '.' + file.name.split('.').pop().toLowerCase();
+    if (!FILE_CONSTRAINTS.ALLOWED_EXTENSIONS.includes(ext)) {
+        showToast(`Unsupported file format. Use: ${FILE_CONSTRAINTS.ALLOWED_EXTENSIONS.join(', ')}`, 'warning');
+        event.target.value = '';
+        return;
+    }
+
+    // Validate file size
+    if (file.size > FILE_CONSTRAINTS.MAX_FILE_SIZE) {
+        showToast('File too large. Maximum size is 50MB', 'warning');
+        event.target.value = '';
+        return;
+    }
+
+    // Check for duplicate structure
+    if (loadedStructures.find(s => s.id === file.name)) {
+        showToast(`File ${file.name} is already loaded`, 'warning');
+        event.target.value = '';
+        return;
+    }
+
     showLoading(true);
 
     try {
         const fileData = await file.text();
         let format = 'pdb';
-        if (file.name.endsWith('.cif') || file.name.endsWith('.mcif')) {
+        if (ext === '.cif' || ext === '.mcif') {
             format = 'mmcif';
-        } else if (file.name.endsWith('.mol2')) {
+        } else if (ext === '.mol2') {
             format = 'mol2';
         }
 
@@ -221,17 +444,22 @@ async function loadFromFile(event) {
         const newIndex = structures.length - 1;
 
         const displayName = file.name.replace(/\.(pdb|cif|mcif|mol2)$/i, '');
+        showToast(`Loaded: ${displayName}`, 'success');
         addToStructuresList(file.name, displayName, newIndex);
 
-        setTimeout(() => {
-            extractSequenceFromIndex(newIndex);
-            applyOutline(outlineEnabled);
-        }, 500);
+        await waitForStructureReady(newIndex);
+        extractSequenceFromIndex(newIndex);
+        applyOutline(outlineEnabled);
 
-        console.log(`Loaded file: ${file.name}`);
+        // Apply initial chain colors (skip camera restore, will reset after)
+        await applyChainColor(true);
+
+        // Reset camera to show the full structure
+        plugin.canvas3d?.requestCameraReset();
+
     } catch (error) {
         console.error('Error loading file:', error);
-        alert(`Failed to load file: ${file.name}`);
+        showToast(`Failed to load file: ${file.name}`, 'error');
     } finally {
         showLoading(false);
         event.target.value = '';
@@ -317,15 +545,24 @@ function extractSequenceFromStructure(structObj) {
         updateChainSelector(Array.from(chains));
         displaySequence();
 
-        console.log(`Extracted ${sequenceData.length} residues from ${chains.size} chains`);
+        // Initialize chain colors if not already set for this structure
+        if (previousChainColors.size === 0 && chains.size > 0) {
+            initializeChainColors(Array.from(chains));
+        }
 
     } catch (error) {
         console.error('Error extracting sequence:', error);
     }
 }
 
+// Initialize chain colors for the current structure
+function initializeChainColors(chains) {
+    const chainColors = getShuffledColorsAvoidingPrevious(chains, CHAIN_COLOR_PALETTE, new Map());
+    previousChainColors = new Map(chainColors);
+}
+
 function updateChainSelector(chains) {
-    const select = document.getElementById('chainSelect');
+    const select = $('chainSelect');
     select.innerHTML = '<option value="">All Chains</option>';
 
     const sortedChains = chains.sort();
@@ -344,8 +581,8 @@ function updateChainSelector(chains) {
 }
 
 function displaySequence() {
-    const container = document.getElementById('sequenceDisplay');
-    const chainInfoEl = document.getElementById('chainInfo');
+    const container = $('sequenceDisplay');
+    const chainInfoEl = $('chainInfo');
     if (!container) return;
 
     const filteredData = currentChainFilter
@@ -397,7 +634,7 @@ function displaySequence() {
 }
 
 function setupSequenceSelection() {
-    const container = document.getElementById('sequenceDisplay');
+    const container = $('sequenceDisplay');
     if (!container) return;
 
     container.addEventListener('mousedown', (e) => {
@@ -489,7 +726,6 @@ async function syncSelectionToViewer() {
         if (loci && loci.elements && loci.elements.length > 0) {
             // Set selection in manager (this shows the green highlight)
             plugin.managers.structure.selection.fromLoci('set', loci);
-            console.log(`Selection synced: ${selectedResidues.size} residues`);
         }
 
     } catch (error) {
@@ -546,7 +782,7 @@ function buildSelectionLoci(structure) {
 }
 
 function updateSelectionInfo() {
-    const badge = document.getElementById('selectionBadge');
+    const badge = $('selectionBadge');
     if (!badge) return;
 
     if (selectedResidues.size === 0) {
@@ -651,14 +887,14 @@ function classifyInteraction(atom1Info, atom2Info, distance) {
     const isNegative2 = negativeRes.includes(atom2Info.resName) && a2.startsWith('O') && a2 !== 'O';
 
     if ((isPositive1 && isNegative2) || (isNegative1 && isPositive2)) {
-        if (distance < 4.0) {
+        if (distance < INTERACTION_DISTANCES.HYDROGEN_BOND) {
             return { type: 'salt-bridge', label: 'Salt Bridge', color: '#FF6B6B' };
         }
     }
 
     // Hydrogen bond
     if ((isHBondDonor(a1) && isHBondAcceptor(a2)) || (isHBondAcceptor(a1) && isHBondDonor(a2))) {
-        if (distance < 3.5) {
+        if (distance < INTERACTION_DISTANCES.IONIC_BOND) {
             // Backbone H-bond
             if (atom1Info.isBackbone && atom2Info.isBackbone) {
                 return { type: 'h-bond-backbone', label: 'H-bond', color: '#888888' };
@@ -672,7 +908,7 @@ function classifyInteraction(atom1Info, atom2Info, distance) {
     const hydrophobicRes = ['ALA', 'VAL', 'LEU', 'ILE', 'MET', 'PHE', 'TRP', 'PRO'];
     const hydrophobicAtoms = (name) => name.startsWith('C') && name !== 'C' && name !== 'CA';
     if (hydrophobicRes.includes(atom1Info.resName) && hydrophobicRes.includes(atom2Info.resName)) {
-        if (hydrophobicAtoms(a1) && hydrophobicAtoms(a2) && distance < 4.5) {
+        if (hydrophobicAtoms(a1) && hydrophobicAtoms(a2) && distance < INTERACTION_DISTANCES.HYDROPHOBIC) {
             return { type: 'hydrophobic', label: 'Hydrophobic', color: '#F7DC6F' };
         }
     }
@@ -680,7 +916,7 @@ function classifyInteraction(atom1Info, atom2Info, distance) {
     // Pi-Pi stacking (aromatic residues)
     const aromaticRes = ['PHE', 'TYR', 'TRP', 'HIS'];
     if (aromaticRes.includes(atom1Info.resName) && aromaticRes.includes(atom2Info.resName)) {
-        if (distance < 5.5) {
+        if (distance < INTERACTION_DISTANCES.PI_STACKING) {
             return { type: 'pi-pi', label: 'π-π', color: '#BB8FCE' };
         }
     }
@@ -691,7 +927,7 @@ function classifyInteraction(atom1Info, atom2Info, distance) {
 
 // Update hover info display
 function updateHoverInfo(event) {
-    const hoverInfo = document.getElementById('hoverInfo');
+    const hoverInfo = $('hoverInfo');
     if (!hoverInfo) return;
 
     if (!event.current || !event.current.loci) {
@@ -781,13 +1017,11 @@ function updateHoverInfo(event) {
 
     } catch (error) {
         // Silently fail - just hide the info
-        console.log('Hover info error:', error);
         hoverInfo.classList.remove('visible');
     }
 }
 
 async function deselectAll() {
-    console.log('deselectAll called');
     selectedResidues.clear();
 
     // Update UI
@@ -802,11 +1036,9 @@ async function deselectAll() {
         try {
             // 1. Clear selection manager (green selection outline)
             plugin.managers.structure.selection.clear();
-            console.log('Selection manager cleared');
 
             // 2. Clear loci highlights (yellow hover highlight)
             plugin.managers.interactivity.lociHighlights.clearHighlights();
-            console.log('Loci highlights cleared');
 
             // 3. Clear any loci marks
             if (plugin.managers.interactivity.lociMarks) {
@@ -826,7 +1058,6 @@ async function deselectAll() {
 
             // 6. Force canvas repaint
             plugin.canvas3d?.requestDraw(true);
-            console.log('Canvas repaint requested');
 
         } catch (e) {
             console.error('Error clearing selection:', e);
@@ -835,7 +1066,7 @@ async function deselectAll() {
 }
 
 function changeSequenceChain() {
-    currentChainFilter = document.getElementById('chainSelect').value;
+    currentChainFilter = $('chainSelect').value;
     displaySequence();
 }
 
@@ -898,13 +1129,7 @@ async function applySecondaryStructureColoring() {
         representationState.cartoon = true;
 
         // Restore camera (with delay to ensure rendering is complete)
-        if (cameraSnapshot && plugin.canvas3d) {
-            setTimeout(() => {
-                plugin.canvas3d.camera.setState(cameraSnapshot, 0);
-            }, 50);
-        }
-
-        console.log('Secondary structure coloring applied');
+        restoreCamera(cameraSnapshot);
 
     } catch (error) {
         console.error('Secondary structure coloring error:', error);
@@ -915,12 +1140,37 @@ async function applySecondaryStructureColoring() {
 
 // =====================================================
 // COLOR & STYLE APPLICATION - Component-based approach
-// residueColorMap stores color per residue
+// residueColorMaps stores color per residue, per structure
 // When applying color or style, rebuild all representations by color groups
 // =====================================================
 
-// Map: residue key ("A:1") -> hex color ("#FF0000")
-let residueColorMap = new Map();
+// Map: structure ID -> Map(residue key "A:1" -> hex color "#FF0000")
+const residueColorMaps = new Map();
+
+// Helper: Get color map for current structure
+function getResidueColorMap() {
+    const structId = getCurrentStructureId();
+    if (!structId) return new Map();
+    if (!residueColorMaps.has(structId)) {
+        residueColorMaps.set(structId, new Map());
+    }
+    return residueColorMaps.get(structId);
+}
+
+// Helper: Get current structure ID
+function getCurrentStructureId() {
+    if (currentStructureIndex >= 0 && currentStructureIndex < loadedStructures.length) {
+        return loadedStructures[currentStructureIndex]?.id;
+    }
+    return currentStructure;
+}
+
+// Helper: Clear color map for a specific structure
+function clearResidueColorMap(structId) {
+    if (structId) {
+        residueColorMaps.delete(structId);
+    }
+}
 
 // Build MolScript query from residue keys
 function buildSelectionQuery(residueSet) {
@@ -955,6 +1205,9 @@ function buildSelectionQuery(residueSet) {
 async function rebuildAllRepresentations(structureRef) {
     const reprBuilder = plugin.builders.structure.representation;
 
+    // Get current structure's color map
+    const colorMap = getResidueColorMap();
+
     // Get all residue keys
     const allResidueKeys = new Set();
     sequenceData.forEach(res => {
@@ -981,7 +1234,6 @@ async function rebuildAllRepresentations(structureRef) {
         }
     }
 
-    console.log(`rebuildAllRepresentations: cartoon=${cartoonResidues.size}, surface=${surfaceResidues.size}, atoms=${atomsVisibleResidues.size}`);
 
     // Helper: create representations for a set of residues with a specific repr type
     const createReprForResidues = async (residueSet, reprType) => {
@@ -992,8 +1244,8 @@ async function rebuildAllRepresentations(structureRef) {
         const uncolored = new Set();
 
         residueSet.forEach(key => {
-            if (residueColorMap.has(key)) {
-                const color = residueColorMap.get(key);
+            if (colorMap.has(key)) {
+                const color = colorMap.get(key);
                 if (!colorGroups.has(color)) colorGroups.set(color, new Set());
                 colorGroups.get(color).add(key);
             } else {
@@ -1054,8 +1306,8 @@ async function rebuildAllRepresentations(structureRef) {
         const atomsUncolored = new Set();
 
         atomsVisibleResidues.forEach(key => {
-            if (residueColorMap.has(key)) {
-                const color = residueColorMap.get(key);
+            if (colorMap.has(key)) {
+                const color = colorMap.get(key);
                 if (!atomsByColor.has(color)) atomsByColor.set(color, new Set());
                 atomsByColor.get(color).add(key);
             } else {
@@ -1063,6 +1315,7 @@ async function rebuildAllRepresentations(structureRef) {
             }
         });
 
+        // Create colored atoms (all atoms including O, N, S)
         for (const [color, residueSet] of atomsByColor) {
             const colorValue = parseInt(color.replace('#', ''), 16);
             const query = buildSelectionQuery(residueSet);
@@ -1080,31 +1333,157 @@ async function rebuildAllRepresentations(structureRef) {
             }
         }
 
+        // Create uncolored atoms
         if (atomsUncolored.size > 0) {
-            const query = buildSelectionQuery(atomsUncolored);
-            const comp = await plugin.builders.structure.tryCreateComponentFromExpression(
-                structureRef.cell, query,
-                `atoms-uncolored-${Date.now()}`,
-                { label: 'Atoms (uncolored)' }
-            );
-            if (comp) {
-                if (currentUniformColor) {
+            if (currentUniformColor) {
+                // Uniform color mode
+                const query = buildSelectionQuery(atomsUncolored);
+                const comp = await plugin.builders.structure.tryCreateComponentFromExpression(
+                    structureRef.cell, query,
+                    `atoms-uncolored-${Date.now()}`,
+                    { label: 'Atoms (uncolored)' }
+                );
+                if (comp) {
                     const colorValue = parseInt(currentUniformColor.replace('#', ''), 16);
                     await addRepresentationWithColor(reprBuilder, comp, 'ball-and-stick', colorValue);
-                } else {
+                }
+            } else if (previousChainColors.size > 0) {
+                // Chain color mode - group by chain and apply chain colors
+                const atomsByChain = new Map();
+                atomsUncolored.forEach(key => {
+                    const chain = key.split(':')[0];
+                    if (!atomsByChain.has(chain)) atomsByChain.set(chain, new Set());
+                    atomsByChain.get(chain).add(key);
+                });
+
+                for (const [chain, residueSet] of atomsByChain) {
+                    const chainColor = previousChainColors.get(chain);
+                    if (chainColor) {
+                        const colorValue = parseInt(chainColor.replace('#', ''), 16);
+                        const query = buildSelectionQuery(residueSet);
+                        try {
+                            const comp = await plugin.builders.structure.tryCreateComponentFromExpression(
+                                structureRef.cell, query,
+                                `atoms-chain-${chain}-${Date.now()}`,
+                                { label: `Atoms Chain ${chain}` }
+                            );
+                            if (comp) {
+                                await addRepresentationWithColor(reprBuilder, comp, 'ball-and-stick', colorValue);
+                            }
+                        } catch (e) {
+                            console.error(`Failed to create atoms for chain ${chain}:`, e);
+                        }
+                    } else {
+                        // No chain color, use default scheme
+                        const query = buildSelectionQuery(residueSet);
+                        const comp = await plugin.builders.structure.tryCreateComponentFromExpression(
+                            structureRef.cell, query,
+                            `atoms-chain-${chain}-default-${Date.now()}`,
+                            { label: `Atoms Chain ${chain}` }
+                        );
+                        if (comp) {
+                            await addRepresentationWithScheme(reprBuilder, comp, 'ball-and-stick', currentColorScheme || 'chain-id');
+                        }
+                    }
+                }
+            } else {
+                // No chain colors set, use color scheme
+                const query = buildSelectionQuery(atomsUncolored);
+                const comp = await plugin.builders.structure.tryCreateComponentFromExpression(
+                    structureRef.cell, query,
+                    `atoms-uncolored-${Date.now()}`,
+                    { label: 'Atoms (uncolored)' }
+                );
+                if (comp) {
                     await addRepresentationWithScheme(reprBuilder, comp, 'ball-and-stick', currentColorScheme || 'chain-id');
                 }
             }
         }
 
-        // 4. Auto-apply element colors
+        // Apply O, N, S with larger size so they appear on top
         await applyElementColorToAtoms(structureRef);
+    }
+}
+
+// Apply element coloring (O=red, N=blue, S=yellow) to residues with visible atoms
+// This overlays fixed colors on O, N, S atoms after main ball-and-stick is created
+async function applyElementColorToAtoms(structureRef) {
+    console.log('[DEBUG] applyElementColorToAtoms called');
+    console.log('[DEBUG] atomsVisibleResidues.size:', atomsVisibleResidues.size);
+
+    if (!plugin || atomsVisibleResidues.size === 0) {
+        console.log('[DEBUG] applyElementColorToAtoms: early return');
+        return;
+    }
+
+    const reprBuilder = plugin.builders.structure.representation;
+
+    // Heteroatom colors (CPK-like)
+    const heteroatomColors = [
+        { element: 'O', color: COLORS.OXYGEN },
+        { element: 'N', color: COLORS.NITROGEN },
+        { element: 'S', color: COLORS.SULFUR }
+    ];
+
+    console.log('[DEBUG] COLORS:', COLORS);
+
+    // Build residue filter from atomsVisibleResidues
+    const residueTests = [];
+    atomsVisibleResidues.forEach(key => {
+        const [chain, resno] = key.split(':');
+        residueTests.push(
+            MS.core.logic.and([
+                MS.core.rel.eq([MS.ammp('auth_asym_id'), chain]),
+                MS.core.rel.eq([MS.ammp('auth_seq_id'), parseInt(resno)])
+            ])
+        );
+    });
+
+    console.log('[DEBUG] residueTests.length:', residueTests.length);
+
+    for (const { element, color } of heteroatomColors) {
+        console.log(`[DEBUG] Processing element ${element} with color ${color}`);
+
+        // Combine: element match AND (residue in atomsVisibleResidues)
+        const elementQuery = MS.struct.generator.atomGroups({
+            'atom-test': MS.core.logic.and([
+                MS.core.rel.eq([MS.acp('elementSymbol'), MS.es(element)]),
+                MS.core.logic.or(residueTests)
+            ])
+        });
+
+        try {
+            const comp = await plugin.builders.structure.tryCreateComponentFromExpression(
+                structureRef.cell,
+                elementQuery,
+                `element-${element}-${Date.now()}`,
+                { label: `${element} atoms` }
+            );
+
+            console.log(`[DEBUG] Component for ${element}:`, comp ? 'created' : 'null');
+
+            if (comp) {
+                // Use slightly larger size so O, N, S appear on top of other atoms
+                await reprBuilder.addRepresentation(comp, {
+                    type: 'ball-and-stick',
+                    color: 'uniform',
+                    colorParams: { value: color },
+                    typeParams: {
+                        sizeFactor: RENDER_PARAMS.ATOM_SIZE_FACTOR * 1.05,
+                        sizeAspectRatio: RENDER_PARAMS.ATOM_ASPECT_RATIO
+                    }
+                });
+                console.log(`[DEBUG] Representation added for ${element}`);
+            }
+        } catch (e) {
+            console.log(`[DEBUG] Error for ${element}:`, e);
+            // Silently ignore - element may not exist in selection
+        }
     }
 }
 
 // Helper: Add representation with uniform color
 async function addRepresentationWithColor(reprBuilder, component, reprType, colorValue) {
-    console.log(`addRepresentationWithColor: ${reprType}, color: 0x${colorValue.toString(16)}`);
     try {
         if (reprType === 'molecular-surface') {
             try {
@@ -1113,22 +1492,26 @@ async function addRepresentationWithColor(reprBuilder, component, reprType, colo
                     color: 'uniform',
                     colorParams: { value: colorValue }
                 });
-                console.log('  -> molecular-surface added');
             } catch (e) {
-                console.log('  -> molecular-surface failed, trying gaussian');
                 await reprBuilder.addRepresentation(component, {
                     type: 'gaussian-surface',
                     color: 'uniform',
                     colorParams: { value: colorValue }
                 });
             }
+        } else if (reprType === 'ball-and-stick') {
+            await reprBuilder.addRepresentation(component, {
+                type: 'ball-and-stick',
+                color: 'uniform',
+                colorParams: { value: colorValue },
+                typeParams: { sizeFactor: RENDER_PARAMS.ATOM_SIZE_FACTOR, sizeAspectRatio: RENDER_PARAMS.ATOM_ASPECT_RATIO }
+            });
         } else {
-            const result = await reprBuilder.addRepresentation(component, {
+            await reprBuilder.addRepresentation(component, {
                 type: reprType,
                 color: 'uniform',
                 colorParams: { value: colorValue }
             });
-            console.log(`  -> ${reprType} added:`, result ? 'success' : 'null result');
         }
     } catch (e) {
         console.error(`Failed to add ${reprType}:`, e);
@@ -1150,6 +1533,12 @@ async function addRepresentationWithScheme(reprBuilder, component, reprType, col
                     color: colorScheme
                 });
             }
+        } else if (reprType === 'ball-and-stick') {
+            await reprBuilder.addRepresentation(component, {
+                type: 'ball-and-stick',
+                color: colorScheme,
+                typeParams: { sizeFactor: RENDER_PARAMS.ATOM_SIZE_FACTOR, sizeAspectRatio: RENDER_PARAMS.ATOM_ASPECT_RATIO }
+            });
         } else {
             await reprBuilder.addRepresentation(component, {
                 type: reprType,
@@ -1163,7 +1552,6 @@ async function addRepresentationWithScheme(reprBuilder, component, reprType, col
 
 // Delete all polymer representations
 async function deleteAllPolymerRepresentations(structureRef) {
-    console.log('deleteAllPolymerRepresentations: starting');
 
     // Use state tree to find and delete all representations
     const state = plugin.state.data;
@@ -1210,7 +1598,6 @@ async function deleteAllPolymerRepresentations(structureRef) {
         }
     });
 
-    console.log(`deleteAllPolymerRepresentations: found ${toDelete.length} items to delete`);
 
     // Delete all found items
     if (toDelete.length > 0) {
@@ -1225,17 +1612,14 @@ async function deleteAllPolymerRepresentations(structureRef) {
         await update.commit();
     }
 
-    console.log('deleteAllPolymerRepresentations: done');
 }
 
 // Apply color to current selection
 async function applyColorToSelection(hexColor) {
     if (!plugin || selectedResidues.size === 0) {
-        console.log('applyColorToSelection: no selection');
         return;
     }
 
-    console.log(`applyColorToSelection: ${hexColor}, ${selectedResidues.size} residues`);
     showLoading(true);
 
     const cameraSnapshot = plugin.canvas3d?.camera.getSnapshot();
@@ -1248,11 +1632,11 @@ async function applyColorToSelection(hexColor) {
             ? currentStructureIndex : 0;
         const structureRef = structures[structIndex];
 
-        // Update color map
+        // Update color map for current structure
+        const colorMap = getResidueColorMap();
         selectedResidues.forEach(key => {
-            residueColorMap.set(key, hexColor);
+            colorMap.set(key, hexColor);
         });
-        console.log(`residueColorMap: ${residueColorMap.size} entries`);
 
         // Delete existing and rebuild
         await deleteAllPolymerRepresentations(structureRef);
@@ -1266,15 +1650,11 @@ async function applyColorToSelection(hexColor) {
             }
         });
 
-        console.log('Color applied');
 
     } catch (error) {
         console.error('Color application error:', error);
     } finally {
-        if (cameraSnapshot && plugin.canvas3d) {
-            plugin.canvas3d.camera.setState(cameraSnapshot, 0);
-            plugin.canvas3d.requestDraw(true);
-        }
+        restoreCamera(cameraSnapshot);
         showLoading(false);
     }
 }
@@ -1283,9 +1663,8 @@ async function setUniformColor(hexColor) {
     currentUniformColor = hexColor;
     currentColorScheme = null;
 
-    // Clear residue color map
-    residueColorMap.clear();
-    console.log('setUniformColor: cleared residueColorMap');
+    // Clear residue color map for current structure (uniform = no per-residue colors)
+    getResidueColorMap().clear();
 
     document.querySelectorAll('.control-btn[data-color]').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.palette-color').forEach(el => {
@@ -1303,7 +1682,6 @@ async function setUniformColor(hexColor) {
     try {
         const colorInt = parseInt(hexColor.replace('#', ''), 16);
 
-        // Get fresh hierarchy reference
         const structures = plugin.managers.structure.hierarchy.current.structures;
         if (structures.length === 0) return;
 
@@ -1311,54 +1689,46 @@ async function setUniformColor(hexColor) {
             ? currentStructureIndex : 0;
         const struct = structures[structIndex];
 
-        // Iterate through fresh components list
-        const components = struct.components || [];
-        console.log(`setUniformColor: Found ${components.length} components`);
+        // If atoms view is active, rebuild to preserve O, N, S colors
+        if (atomsVisibleResidues.size > 0) {
+            await deleteAllPolymerRepresentations(struct);
+            await rebuildAllRepresentations(struct);
+        } else {
+            // Update color on all existing representations directly
+            const components = struct.components || [];
 
-        let updatedCount = 0;
-        for (const comp of components) {
-            if (!comp.representations) continue;
+            for (const comp of components) {
+                if (!comp.representations) continue;
 
-            for (const repr of comp.representations) {
-                if (!repr.cell?.obj) continue;
+                for (const repr of comp.representations) {
+                    if (!repr.cell?.obj) continue;
 
-                // Get repr type for logging
-                const reprLabel = repr.cell.obj?.repr?.label || 'unknown';
-                console.log(`Updating color for: ${reprLabel}`);
+                    try {
+                        const state = plugin.state.data;
+                        const reprCell = repr.cell;
 
-                try {
-                    // Update color theme directly on the representation cell
-                    const state = plugin.state.data;
-                    const reprCell = repr.cell;
+                        if (reprCell && reprCell.transform) {
+                            const oldParams = reprCell.transform.params;
+                            const newParams = {
+                                ...oldParams,
+                                colorTheme: {
+                                    name: 'uniform',
+                                    params: { value: colorInt }
+                                }
+                            };
 
-                    if (reprCell && reprCell.transform) {
-                        const oldParams = reprCell.transform.params;
-                        const newParams = {
-                            ...oldParams,
-                            colorTheme: {
-                                name: 'uniform',
-                                params: { value: colorInt }
-                            }
-                        };
-
-                        const update = state.build().to(reprCell.transform.ref).update(newParams);
-                        await plugin.runTask(state.updateTree(update));
-                        updatedCount++;
+                            const update = state.build().to(reprCell.transform.ref).update(newParams);
+                            await plugin.runTask(state.updateTree(update));
+                        }
+                    } catch (e) {
+                        // Silently ignore individual update errors
                     }
-                } catch (e) {
-                    console.error(`Color update error for ${reprLabel}:`, e);
                 }
             }
         }
 
-        console.log(`Uniform color applied: ${hexColor} to ${updatedCount} representations`);
-
         // Restore camera
-        if (cameraSnapshot && plugin.canvas3d) {
-            setTimeout(() => {
-                plugin.canvas3d.camera.setState(cameraSnapshot, 0);
-            }, 50);
-        }
+        restoreCamera(cameraSnapshot);
 
     } catch (error) {
         console.error('Uniform color error:', error);
@@ -1378,7 +1748,7 @@ function rgbToHex(rgb) {
 }
 
 function openColorPicker() {
-    document.getElementById('colorPicker').click();
+    $('colorPicker').click();
 }
 
 function applyCustomColor(hexColor) {
@@ -1410,81 +1780,43 @@ const CHAIN_COLOR_PALETTE = [
     '#6A5ACD',  // Slate Blue
 ];
 
-// Fisher-Yates shuffle - returns a new shuffled array
-function shuffleArray(array) {
-    const shuffled = [...array];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    return shuffled;
-}
+// Track previous chain colors to avoid same color assignment
+let previousChainColors = new Map();
 
-// Apply element coloring (O=red, N=blue, S=yellow) to residues with visible atoms
-// This is called automatically after rebuildAllRepresentations
-async function applyElementColorToAtoms(structureRef) {
-    if (!plugin || atomsVisibleResidues.size === 0) return;
+// Get a different color for each chain, avoiding previous colors
+function getShuffledColorsAvoidingPrevious(chains, palette, prevColors) {
+    const result = new Map();
+    const availableColors = [...palette];
 
-    const reprBuilder = plugin.builders.structure.representation;
+    chains.forEach(chain => {
+        const prevColor = prevColors.get(chain);
+        // Filter out previous color if available
+        let candidates = prevColor
+            ? availableColors.filter(c => c !== prevColor)
+            : availableColors;
 
-    // Heteroatom colors (CPK-like)
-    const heteroatomColors = [
-        { element: 'O', color: 0xFF4444 },  // Red - Oxygen
-        { element: 'N', color: 0x4444FF },  // Blue - Nitrogen
-        { element: 'S', color: 0xFFCC00 },  // Yellow - Sulfur
-    ];
+        // If all colors used, allow any color
+        if (candidates.length === 0) {
+            candidates = availableColors;
+        }
 
-    // Build residue filter from atomsVisibleResidues
-    const residueTests = [];
-    atomsVisibleResidues.forEach(key => {
-        const [chain, resno] = key.split(':');
-        residueTests.push(
-            MS.core.logic.and([
-                MS.core.rel.eq([MS.ammp('auth_asym_id'), chain]),
-                MS.core.rel.eq([MS.ammp('auth_seq_id'), parseInt(resno)])
-            ])
-        );
+        // Pick random color from candidates
+        const randomIndex = Math.floor(Math.random() * candidates.length);
+        const selectedColor = candidates[randomIndex];
+        result.set(chain, selectedColor);
     });
 
-    for (const { element, color } of heteroatomColors) {
-        // Combine: element match AND (residue in atomsVisibleResidues)
-        const elementQuery = MS.struct.generator.atomGroups({
-            'atom-test': MS.core.logic.and([
-                MS.core.rel.eq([MS.acp('elementSymbol'), MS.es(element)]),
-                MS.core.logic.or(residueTests)
-            ])
-        });
-
-        try {
-            const comp = await plugin.builders.structure.tryCreateComponentFromExpression(
-                structureRef.cell,
-                elementQuery,
-                `element-${element}-${Date.now()}`,
-                { label: `${element} atoms` }
-            );
-
-            if (comp) {
-                await reprBuilder.addRepresentation(comp, {
-                    type: 'ball-and-stick',
-                    color: 'uniform',
-                    colorParams: { value: color },
-                    typeParams: { sizeFactor: 0.15, sizeAspectRatio: 0.88 }
-                });
-            }
-        } catch (e) {
-            // Silently ignore - element may not exist in selection
-        }
-    }
-
-    console.log(`Element colors applied to ${atomsVisibleResidues.size} residues`);
+    return result;
 }
 
 // Apply chain-based coloring with custom palette
-async function applyChainColor() {
+// skipCameraRestore: true when called during initial load (camera will be reset after)
+async function applyChainColor(skipCameraRestore = false) {
     if (!plugin || !currentStructure) return;
 
-    // Clear previous states
-    residueColorMap.clear();
+    // Clear previous states for current structure
+    const colorMap = getResidueColorMap();
+    colorMap.clear();
     currentUniformColor = null;
     currentColorScheme = 'custom-chain';
 
@@ -1492,7 +1824,7 @@ async function applyChainColor() {
     document.querySelectorAll('.palette-color').forEach(el => el.classList.remove('active'));
 
     showLoading(true);
-    const cameraSnapshot = plugin.canvas3d?.camera.getSnapshot();
+    const cameraSnapshot = skipCameraRestore ? null : plugin.canvas3d?.camera.getSnapshot();
 
     try {
         const structures = plugin.managers.structure.hierarchy.current.structures;
@@ -1504,34 +1836,29 @@ async function applyChainColor() {
 
         // Get unique chains from sequence data
         const chains = [...new Set(sequenceData.map(r => r.chain))];
-        console.log(`applyChainColor: Found ${chains.length} chains:`, chains);
 
-        // Shuffle colors for variety each time
-        const shuffledColors = shuffleArray(CHAIN_COLOR_PALETTE);
+        // Get colors avoiding previous assignment
+        const chainColors = getShuffledColorsAvoidingPrevious(chains, CHAIN_COLOR_PALETTE, previousChainColors);
 
         // Assign colors to each chain's residues
-        chains.forEach((chain, index) => {
-            const color = shuffledColors[index % shuffledColors.length];
+        chains.forEach(chain => {
+            const color = chainColors.get(chain);
             sequenceData.forEach(res => {
                 if (res.chain === chain) {
-                    residueColorMap.set(`${res.chain}:${res.resno}`, color);
+                    colorMap.set(`${res.chain}:${res.resno}`, color);
                 }
             });
         });
 
-        console.log(`residueColorMap: ${residueColorMap.size} entries with ${chains.length} chain colors`);
+        // Save current colors for next time
+        previousChainColors = new Map(chainColors);
+
 
         // Delete existing and rebuild with new colors
         await deleteAllPolymerRepresentations(structureRef);
         await rebuildAllRepresentations(structureRef);
 
-        if (cameraSnapshot && plugin.canvas3d) {
-            setTimeout(() => {
-                plugin.canvas3d.camera.setState(cameraSnapshot, 0);
-            }, 50);
-        }
-
-        console.log('Custom chain colors applied');
+        restoreCamera(cameraSnapshot);
 
     } catch (error) {
         console.error('Chain color error:', error);
@@ -1587,14 +1914,14 @@ async function setStyle(style) {
                         type: 'molecular-surface',
                         color: colorScheme,
                         colorParams,
-                        typeParams: { quality: 'auto', probeRadius: 1.4, resolution: 2 }
+                        typeParams: { quality: 'auto', probeRadius: RENDER_PARAMS.PROBE_RADIUS, resolution: RENDER_PARAMS.SURFACE_RESOLUTION }
                     });
                 } catch (e) {
                     await reprBuilder.addRepresentation(polymerComp, {
                         type: 'gaussian-surface',
                         color: colorScheme,
                         colorParams,
-                        typeParams: { radiusOffset: 1, smoothness: 1.5 }
+                        typeParams: { radiusOffset: 1, smoothness: RENDER_PARAMS.SURFACE_SMOOTHNESS }
                     });
                 }
             } else if (style === 'ball-and-stick') {
@@ -1647,18 +1974,14 @@ async function setStyle(style) {
             await reprBuilder.addRepresentation(waterComp, {
                 type: 'ball-and-stick',
                 color: 'element-symbol',
-                sizeTheme: { name: 'uniform', params: { value: 0.4 } }
+                sizeTheme: { name: 'uniform', params: { value: RENDER_PARAMS.UNIFORM_SIZE } }
             });
         }
 
         applyOutline(outlineEnabled);
 
         // Restore camera state AFTER changes (with delay to ensure rendering is complete)
-        if (cameraSnapshot && plugin.canvas3d) {
-            setTimeout(() => {
-                plugin.canvas3d.camera.setState(cameraSnapshot, 0);
-            }, 50);
-        }
+        restoreCamera(cameraSnapshot);
 
     } catch (error) {
         console.error('Error setting style:', error);
@@ -1692,17 +2015,14 @@ async function showRepresentation(type) {
             ? currentStructureIndex : 0;
         const structureRef = structures[structIndex];
 
-        console.log(`Show ${type}, selection: ${selectedResidues.size}`);
 
         if (type === 'atoms') {
             // ATOMS: Add selected residues (or all if none) to atomsVisibleResidues
             representationState.atoms = true;
             if (selectedResidues.size > 0) {
                 selectedResidues.forEach(key => atomsVisibleResidues.add(key));
-                console.log(`Added ${selectedResidues.size} to atomsVisibleResidues, total: ${atomsVisibleResidues.size}`);
             } else {
                 sequenceData.forEach(res => atomsVisibleResidues.add(`${res.chain}:${res.resno}`));
-                console.log(`Added all ${atomsVisibleResidues.size} to atomsVisibleResidues`);
             }
         } else if (type === 'cartoon') {
             // CARTOON: Add selected residues (or switch to full mode if none)
@@ -1710,12 +2030,10 @@ async function showRepresentation(type) {
             if (selectedResidues.size > 0) {
                 cartoonPartialMode = true;
                 selectedResidues.forEach(key => cartoonVisibleResidues.add(key));
-                console.log(`Added ${selectedResidues.size} to cartoonVisibleResidues, total: ${cartoonVisibleResidues.size}`);
             } else {
                 // No selection - full mode (show all)
                 cartoonPartialMode = false;
                 cartoonVisibleResidues.clear();
-                console.log('Cartoon: full mode (all residues)');
             }
         } else if (type === 'surface') {
             // SURFACE: Add selected residues (or switch to full mode if none)
@@ -1723,12 +2041,10 @@ async function showRepresentation(type) {
             if (selectedResidues.size > 0) {
                 surfacePartialMode = true;
                 selectedResidues.forEach(key => surfaceVisibleResidues.add(key));
-                console.log(`Added ${selectedResidues.size} to surfaceVisibleResidues, total: ${surfaceVisibleResidues.size}`);
             } else {
                 // No selection - full mode (show all)
                 surfacePartialMode = false;
                 surfaceVisibleResidues.clear();
-                console.log('Surface: full mode (all residues)');
             }
         }
 
@@ -1739,10 +2055,7 @@ async function showRepresentation(type) {
     } catch (error) {
         console.error(`Error showing ${type}:`, error);
     } finally {
-        if (cameraSnapshot && plugin.canvas3d) {
-            plugin.canvas3d.camera.setState(cameraSnapshot, 0);
-            plugin.canvas3d.requestDraw(true);
-        }
+        restoreCamera(cameraSnapshot);
         showLoading(false);
     }
 }
@@ -1761,16 +2074,13 @@ async function hideRepresentation(type) {
             ? currentStructureIndex : 0;
         const structureRef = structures[structIndex];
 
-        console.log(`Hide ${type}, selection: ${selectedResidues.size}`);
 
         if (type === 'atoms') {
             // ATOMS: Remove selected residues (or all if none)
             if (selectedResidues.size > 0) {
                 selectedResidues.forEach(key => atomsVisibleResidues.delete(key));
-                console.log(`Removed ${selectedResidues.size} from atomsVisibleResidues, remaining: ${atomsVisibleResidues.size}`);
             } else {
                 atomsVisibleResidues.clear();
-                console.log('Cleared all atomsVisibleResidues');
             }
             representationState.atoms = atomsVisibleResidues.size > 0;
 
@@ -1778,7 +2088,6 @@ async function hideRepresentation(type) {
             // CARTOON: Remove selected residues (or turn off completely if none)
             if (selectedResidues.size > 0 && cartoonPartialMode) {
                 selectedResidues.forEach(key => cartoonVisibleResidues.delete(key));
-                console.log(`Removed ${selectedResidues.size} from cartoonVisibleResidues, remaining: ${cartoonVisibleResidues.size}`);
                 // If no residues left, turn off cartoon
                 if (cartoonVisibleResidues.size === 0) {
                     representationState.cartoon = false;
@@ -1789,14 +2098,12 @@ async function hideRepresentation(type) {
                 representationState.cartoon = false;
                 cartoonPartialMode = false;
                 cartoonVisibleResidues.clear();
-                console.log('Cartoon: turned off completely');
             }
 
         } else if (type === 'surface') {
             // SURFACE: Remove selected residues (or turn off completely if none)
             if (selectedResidues.size > 0 && surfacePartialMode) {
                 selectedResidues.forEach(key => surfaceVisibleResidues.delete(key));
-                console.log(`Removed ${selectedResidues.size} from surfaceVisibleResidues, remaining: ${surfaceVisibleResidues.size}`);
                 // If no residues left, turn off surface
                 if (surfaceVisibleResidues.size === 0) {
                     representationState.surface = false;
@@ -1807,7 +2114,6 @@ async function hideRepresentation(type) {
                 representationState.surface = false;
                 surfacePartialMode = false;
                 surfaceVisibleResidues.clear();
-                console.log('Surface: turned off completely');
             }
         }
 
@@ -1815,15 +2121,11 @@ async function hideRepresentation(type) {
         await deleteAllPolymerRepresentations(structureRef);
         await rebuildAllRepresentations(structureRef);
 
-        console.log(`Hide ${type}: done`);
 
     } catch (error) {
         console.error(`Error hiding ${type}:`, error);
     } finally {
-        if (cameraSnapshot && plugin.canvas3d) {
-            plugin.canvas3d.camera.setState(cameraSnapshot, 0);
-            plugin.canvas3d.requestDraw(true);
-        }
+        restoreCamera(cameraSnapshot);
         showLoading(false);
     }
 }
@@ -1831,7 +2133,7 @@ async function hideRepresentation(type) {
 // Outline
 function toggleOutline() {
     outlineEnabled = !outlineEnabled;
-    document.getElementById('outlineBtn').classList.toggle('active', outlineEnabled);
+    $('outlineBtn').classList.toggle('active', outlineEnabled);
     applyOutline(outlineEnabled);
 }
 
@@ -1844,8 +2146,8 @@ function applyOutline(enabled) {
                 outline: {
                     name: enabled ? 'on' : 'off',
                     params: enabled ? {
-                        scale: 1.0,
-                        threshold: 0.33,
+                        scale: RENDER_PARAMS.OUTLINE_SCALE,
+                        threshold: RENDER_PARAMS.OUTLINE_THRESHOLD,
                         color: { r: 0, g: 0, b: 0 },
                         includeTransparent: true
                     } : {}
@@ -1866,7 +2168,7 @@ function resetView() {
 
 function toggleSpin() {
     isSpinning = !isSpinning;
-    document.getElementById('spinBtn').classList.toggle('active', isSpinning);
+    $('spinBtn').classList.toggle('active', isSpinning);
 
     if (!plugin?.canvas3d) return;
 
@@ -1900,11 +2202,11 @@ function takeScreenshot() {
 
 function toggleLegend(event) {
     event.stopPropagation();
-    document.getElementById('legendTooltip')?.classList.toggle('show');
+    $('legendTooltip')?.classList.toggle('show');
 }
 
 document.addEventListener('click', (e) => {
-    const tooltip = document.getElementById('legendTooltip');
+    const tooltip = $('legendTooltip');
     if (tooltip && !e.target.closest('.legend-toggle')) {
         tooltip.classList.remove('show');
     }
@@ -1935,7 +2237,6 @@ function saveCurrentSelectionAsGroup() {
     });
 
     updateGroupListUI();
-    console.log(`Group ${newId} saved`);
 }
 
 function selectGroup(groupId) {
@@ -1957,8 +2258,8 @@ function deleteGroup(groupId) {
 }
 
 function updateGroupListUI() {
-    const groupList = document.getElementById('groupList');
-    const groupDivider = document.getElementById('groupDivider');
+    const groupList = $('groupList');
+    const groupDivider = $('groupDivider');
     if (!groupList) return;
 
     groupList.innerHTML = '';
@@ -1984,7 +2285,7 @@ function updateGroupListUI() {
 }
 
 function updateSelButtonState() {
-    const selBtn = document.getElementById('selBtn');
+    const selBtn = $('selBtn');
     if (!selBtn) return;
 
     const hasSelection = selectedResidues.size > 0;
@@ -2004,7 +2305,7 @@ function addToStructuresList(id, name, structIndex) {
 
 function updateStructuresListUI() {
     // Update floating structure tags in viewer
-    const floatingContainer = document.getElementById('floatingStructures');
+    const floatingContainer = $('floatingStructures');
     if (floatingContainer) {
         if (loadedStructures.length === 0) {
             floatingContainer.innerHTML = '';
@@ -2077,7 +2378,6 @@ async function toggleStructureVisibility(structureId) {
                 }
             }
 
-            console.log(`Structure ${structureId} visibility: ${newVisible}`);
         } catch (e) {
             console.error('Toggle visibility error:', e);
         }
@@ -2202,7 +2502,6 @@ async function removeStructure(structureId) {
             update.delete(cellToDelete);
             await update.commit();
 
-            console.log(`Removed structure: ${structureId}`);
         }
 
         // Update local state
@@ -2225,8 +2524,15 @@ async function removeStructure(structureId) {
                 currentStructureIndex = -1;
                 sequenceData = [];
                 selectedResidues = new Set();
-                document.getElementById('sequenceDisplay').innerHTML = '';
-                document.getElementById('chainSelect').innerHTML = '<option value="">All</option>';
+                $('sequenceDisplay').innerHTML = '';
+                $('chainSelect').innerHTML = '<option value="">All</option>';
+
+                // Clear hover info display
+                const hoverInfo = $('hoverInfo');
+                if (hoverInfo) {
+                    hoverInfo.innerHTML = '';
+                    hoverInfo.classList.remove('visible');
+                }
             }
         }
     } catch (error) {
@@ -2277,7 +2583,7 @@ async function clearAllStructures() {
         loadedStructures = [];
         currentStructure = null;
         currentStructureIndex = -1;
-        residueColorMap.clear();
+        residueColorMaps.clear();
         atomsVisibleResidues.clear();
         cartoonVisibleResidues.clear();
         surfaceVisibleResidues.clear();
@@ -2295,10 +2601,16 @@ async function clearAllStructures() {
         selectionGroups = [];
         updateGroupListUI();
 
-        document.getElementById('sequenceDisplay').innerHTML = '';
-        document.getElementById('chainSelect').innerHTML = '<option value="">All</option>';
+        $('sequenceDisplay').innerHTML = '';
+        $('chainSelect').innerHTML = '<option value="">All</option>';
 
-        console.log('All structures cleared');
+        // Clear hover info display
+        const hoverInfo = $('hoverInfo');
+        if (hoverInfo) {
+            hoverInfo.innerHTML = '';
+            hoverInfo.classList.remove('visible');
+        }
+
     } catch (error) {
         console.error('Clear error:', error);
     } finally {
@@ -2332,6 +2644,7 @@ window.hideRepresentation = hideRepresentation;
 window.applyChainColor = applyChainColor;
 window.toggleStructureVisibility = toggleStructureVisibility;
 window.downloadStructure = downloadStructure;
+window.cleanup = cleanup;
 
 // Download structure as PDB file
 async function downloadStructure(structureId) {
@@ -2384,12 +2697,11 @@ async function downloadStructure(structureId) {
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
 
-                console.log(`Downloaded: ${structInfo.name}.cif`);
             }
         }
     } catch (error) {
         console.error('Download error:', error);
-        alert('Failed to download structure. See console for details.');
+        showToast('Failed to download structure', 'error');
     } finally {
         showLoading(false);
     }
@@ -2400,7 +2712,10 @@ document.addEventListener('DOMContentLoaded', () => {
     initViewer();
     setupSequenceWheelScroll();
 
-    document.getElementById('pdbId').addEventListener('keypress', (e) => {
+    $('pdbId').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') loadFromPDB();
     });
 });
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', cleanup);
