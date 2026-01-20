@@ -1402,70 +1402,6 @@ async function rebuildAllRepresentations(structureRef) {
                 }
             }
         }
-
-        // Apply O, N, S with larger size so they appear on top
-        await applyElementColorToAtoms(structureRef);
-    }
-}
-
-// Apply element coloring (O=red, N=blue, S=yellow) to residues with visible atoms
-// This overlays fixed colors on O, N, S atoms after main ball-and-stick is created
-async function applyElementColorToAtoms(structureRef) {
-    if (!plugin || atomsVisibleResidues.size === 0) return;
-
-    const reprBuilder = plugin.builders.structure.representation;
-
-    // Heteroatom colors (CPK-like)
-    const heteroatomColors = [
-        { element: 'O', color: COLORS.OXYGEN },
-        { element: 'N', color: COLORS.NITROGEN },
-        { element: 'S', color: COLORS.SULFUR }
-    ];
-
-    // Build residue filter from atomsVisibleResidues
-    const residueTests = [];
-    atomsVisibleResidues.forEach(key => {
-        const [chain, resno] = key.split(':');
-        residueTests.push(
-            MS.core.logic.and([
-                MS.core.rel.eq([MS.ammp('auth_asym_id'), chain]),
-                MS.core.rel.eq([MS.ammp('auth_seq_id'), parseInt(resno)])
-            ])
-        );
-    });
-
-    for (const { element, color } of heteroatomColors) {
-        // Combine: element match AND (residue in atomsVisibleResidues)
-        const elementQuery = MS.struct.generator.atomGroups({
-            'atom-test': MS.core.logic.and([
-                MS.core.rel.eq([MS.acp('elementSymbol'), MS.es(element)]),
-                MS.core.logic.or(residueTests)
-            ])
-        });
-
-        try {
-            const comp = await plugin.builders.structure.tryCreateComponentFromExpression(
-                structureRef.cell,
-                elementQuery,
-                `element-${element}-${Date.now()}`,
-                { label: `${element} atoms` }
-            );
-
-            if (comp) {
-                // Use slightly larger size so O, N, S appear on top of other atoms
-                await reprBuilder.addRepresentation(comp, {
-                    type: 'ball-and-stick',
-                    color: 'uniform',
-                    colorParams: { value: color },
-                    typeParams: {
-                        sizeFactor: RENDER_PARAMS.ATOM_SIZE_FACTOR * 1.05,
-                        sizeAspectRatio: RENDER_PARAMS.ATOM_ASPECT_RATIO
-                    }
-                });
-            }
-        } catch (e) {
-            // Silently ignore - element may not exist in selection
-        }
     }
 }
 
@@ -1487,10 +1423,19 @@ async function addRepresentationWithColor(reprBuilder, component, reprType, colo
                 });
             }
         } else if (reprType === 'ball-and-stick') {
+            // Use element-symbol theme with carbonColor to preserve O, N, S colors
             await reprBuilder.addRepresentation(component, {
                 type: 'ball-and-stick',
-                color: 'uniform',
-                colorParams: { value: colorValue },
+                color: 'element-symbol',
+                colorParams: {
+                    carbonColor: {
+                        name: 'uniform',
+                        params: { value: colorValue }
+                    },
+                    saturation: 0,
+                    lightness: 0.2,
+                    colors: { name: 'default', params: {} }
+                },
                 typeParams: { sizeFactor: RENDER_PARAMS.ATOM_SIZE_FACTOR, sizeAspectRatio: RENDER_PARAMS.ATOM_ASPECT_RATIO }
             });
         } else {
@@ -1521,9 +1466,30 @@ async function addRepresentationWithScheme(reprBuilder, component, reprType, col
                 });
             }
         } else if (reprType === 'ball-and-stick') {
+            // Use element-symbol theme with carbonColor to preserve O, N, S colors
             await reprBuilder.addRepresentation(component, {
                 type: 'ball-and-stick',
-                color: colorScheme,
+                color: 'element-symbol',
+                colorParams: {
+                    carbonColor: {
+                        name: colorScheme,
+                        params: colorScheme === 'chain-id' ? {
+                            asymId: 'auth',
+                            palette: {
+                                name: 'colors',
+                                params: {
+                                    list: {
+                                        kind: 'set',
+                                        colors: CHAIN_COLOR_PALETTE.map(hex => parseInt(hex.replace('#', ''), 16))
+                                    }
+                                }
+                            }
+                        } : {}
+                    },
+                    saturation: 0,
+                    lightness: 0.2,
+                    colors: { name: 'default', params: {} }
+                },
                 typeParams: { sizeFactor: RENDER_PARAMS.ATOM_SIZE_FACTOR, sizeAspectRatio: RENDER_PARAMS.ATOM_ASPECT_RATIO }
             });
         } else {
