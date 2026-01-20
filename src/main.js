@@ -307,6 +307,9 @@ async function initViewer() {
                 manualReset: true
             }
         });
+
+        // Focus representation uses element-symbol theme by default
+        // Color will be updated when user applies colors via setUniformColor or applyChainColor
     }
 
     // Add click listener for deselecting when clicking empty space
@@ -1408,13 +1411,7 @@ async function rebuildAllRepresentations(structureRef) {
 // Apply element coloring (O=red, N=blue, S=yellow) to residues with visible atoms
 // This overlays fixed colors on O, N, S atoms after main ball-and-stick is created
 async function applyElementColorToAtoms(structureRef) {
-    console.log('[DEBUG] applyElementColorToAtoms called');
-    console.log('[DEBUG] atomsVisibleResidues.size:', atomsVisibleResidues.size);
-
-    if (!plugin || atomsVisibleResidues.size === 0) {
-        console.log('[DEBUG] applyElementColorToAtoms: early return');
-        return;
-    }
+    if (!plugin || atomsVisibleResidues.size === 0) return;
 
     const reprBuilder = plugin.builders.structure.representation;
 
@@ -1424,8 +1421,6 @@ async function applyElementColorToAtoms(structureRef) {
         { element: 'N', color: COLORS.NITROGEN },
         { element: 'S', color: COLORS.SULFUR }
     ];
-
-    console.log('[DEBUG] COLORS:', COLORS);
 
     // Build residue filter from atomsVisibleResidues
     const residueTests = [];
@@ -1439,11 +1434,7 @@ async function applyElementColorToAtoms(structureRef) {
         );
     });
 
-    console.log('[DEBUG] residueTests.length:', residueTests.length);
-
     for (const { element, color } of heteroatomColors) {
-        console.log(`[DEBUG] Processing element ${element} with color ${color}`);
-
         // Combine: element match AND (residue in atomsVisibleResidues)
         const elementQuery = MS.struct.generator.atomGroups({
             'atom-test': MS.core.logic.and([
@@ -1460,8 +1451,6 @@ async function applyElementColorToAtoms(structureRef) {
                 { label: `${element} atoms` }
             );
 
-            console.log(`[DEBUG] Component for ${element}:`, comp ? 'created' : 'null');
-
             if (comp) {
                 // Use slightly larger size so O, N, S appear on top of other atoms
                 await reprBuilder.addRepresentation(comp, {
@@ -1473,10 +1462,8 @@ async function applyElementColorToAtoms(structureRef) {
                         sizeAspectRatio: RENDER_PARAMS.ATOM_ASPECT_RATIO
                     }
                 });
-                console.log(`[DEBUG] Representation added for ${element}`);
             }
         } catch (e) {
-            console.log(`[DEBUG] Error for ${element}:`, e);
             // Silently ignore - element may not exist in selection
         }
     }
@@ -1727,6 +1714,9 @@ async function setUniformColor(hexColor) {
             }
         }
 
+        // Update focus representation color
+        await updateFocusRepresentationColor(colorInt);
+
         // Restore camera
         restoreCamera(cameraSnapshot);
 
@@ -1734,6 +1724,122 @@ async function setUniformColor(hexColor) {
         console.error('Uniform color error:', error);
     } finally {
         showLoading(false);
+    }
+}
+
+// Update focus representation to use element-symbol with custom carbon color
+// This ensures O, N, S maintain CPK colors while carbon uses the specified color
+async function updateFocusRepresentationColor(colorInt) {
+    if (!plugin) return;
+
+    try {
+        // 1. Update existing focus representations (if any are currently shown)
+        const state = plugin.state.data;
+        const focusTargetTag = 'structure-focus-target-repr';
+        const focusSurrTag = 'structure-focus-surr-repr';
+
+        const allCells = state.cells;
+        const focusReprs = [];
+
+        allCells.forEach((cell) => {
+            if (cell.transform?.tags) {
+                if (cell.transform.tags.includes(focusTargetTag) ||
+                    cell.transform.tags.includes(focusSurrTag)) {
+                    focusReprs.push(cell);
+                }
+            }
+        });
+
+        for (const reprCell of focusReprs) {
+            if (!reprCell.transform) continue;
+
+            const oldParams = reprCell.transform.params;
+            const newParams = {
+                ...oldParams,
+                colorTheme: {
+                    name: 'element-symbol',
+                    params: {
+                        carbonColor: {
+                            name: 'uniform',
+                            params: { value: colorInt }
+                        },
+                        saturation: 0,
+                        lightness: 0.2,
+                        colors: { name: 'default', params: {} }
+                    }
+                }
+            };
+
+            const update = state.build().to(reprCell.transform.ref).update(newParams);
+            await plugin.runTask(state.updateTree(update));
+        }
+
+        // 2. Update focus behavior default params for future focus events
+        const focusReprModule = await import('molstar/lib/mol-plugin/behavior/dynamic/selection/structure-focus-representation');
+        const StructureFocusRepresentation = focusReprModule.StructureFocusRepresentation;
+
+        if (plugin.state.hasBehavior(StructureFocusRepresentation)) {
+            await plugin.state.updateBehavior(StructureFocusRepresentation, p => {
+                const colorTheme = {
+                    name: 'element-symbol',
+                    params: {
+                        carbonColor: {
+                            name: 'uniform',
+                            params: { value: colorInt }
+                        },
+                        saturation: 0,
+                        lightness: 0.2,
+                        colors: { name: 'default', params: {} }
+                    }
+                };
+                p.targetParams.colorTheme = colorTheme;
+                p.surroundingsParams.colorTheme = colorTheme;
+            });
+        }
+    } catch (e) {
+        console.error('Error updating focus representation color:', e);
+    }
+}
+
+// Update focus representation to use chain-id colors (for chain coloring mode)
+async function updateFocusRepresentationChainColor() {
+    if (!plugin) return;
+
+    try {
+        const focusReprModule = await import('molstar/lib/mol-plugin/behavior/dynamic/selection/structure-focus-representation');
+        const StructureFocusRepresentation = focusReprModule.StructureFocusRepresentation;
+
+        if (plugin.state.hasBehavior(StructureFocusRepresentation)) {
+            await plugin.state.updateBehavior(StructureFocusRepresentation, p => {
+                const colorTheme = {
+                    name: 'element-symbol',
+                    params: {
+                        carbonColor: {
+                            name: 'chain-id',
+                            params: {
+                                asymId: 'auth',
+                                palette: {
+                                    name: 'colors',
+                                    params: {
+                                        list: {
+                                            kind: 'set',
+                                            colors: CHAIN_COLOR_PALETTE.map(hex => parseInt(hex.replace('#', ''), 16))
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        saturation: 0,
+                        lightness: 0.2,
+                        colors: { name: 'default', params: {} }
+                    }
+                };
+                p.targetParams.colorTheme = colorTheme;
+                p.surroundingsParams.colorTheme = colorTheme;
+            });
+        }
+    } catch (e) {
+        console.error('Error updating focus representation chain color:', e);
     }
 }
 
@@ -1857,6 +1963,9 @@ async function applyChainColor(skipCameraRestore = false) {
         // Delete existing and rebuild with new colors
         await deleteAllPolymerRepresentations(structureRef);
         await rebuildAllRepresentations(structureRef);
+
+        // Update focus representation to use chain colors
+        await updateFocusRepresentationChainColor();
 
         restoreCamera(cameraSnapshot);
 
